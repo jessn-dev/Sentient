@@ -23,17 +23,20 @@
 
 ---
 
-🛠 Tech Stack
+## 🛠 Tech Stack
 
-| Component  | Technology | Version  | Description                                     |
-| :--------- | :--------- | :------- | :---------------------------------------------- |
-| Frontend   | Next.js    | 16.1.1   | React 19, Server Components, Tailwind CSS       |
-| Backend    | FastAPI    |          | Python 3.14, Pydantic v2                        |
-| ML Engine  | Prophet    | 1.1.5    | Time-series forecasting                         |
-| NLP Engine | FinBERT    | ProsusAI | Financial Sentiment Analysis (via Hugging Face) |
-| Database   | LibSQL     | Latest   | Distributed SQLite (Turso compatible)           |
-| Container  | Docker     | 24+      | Containerization for local dev & Render         |
+| Component  | Technology | Description                                     |
+| :--------- | :--------- | :---------------------------------------------- |
+| Frontend   | Next.js    | React 19, Server Components, Tailwind CSS       |
+| Backend    | FastAPI    | Python 3.14, Pydantic v2                        |
+| ML Engine  | Prophet    | Time-series forecasting                         |
+| NLP Engine | FinBERT    | Financial Sentiment Analysis (via Hugging Face) |
+| Database   | LibSQL     | Distributed SQLite (Turso compatible)           |
+| Container  | Docker     | Containerization for local dev & Render         |
 
+---
+
+## Data Flow Diagram
 
 ```graph TD
     Client((Client)) --> Input[Raw JSON]
