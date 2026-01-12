@@ -1,0 +1,2 @@
+# Sentient
+Stock prediction platform
