@@ -35,22 +35,21 @@
 | Container  | Docker     | 24+      | Containerization for local dev & Render         |
 
 
-```graph LR
-    subgraph "Validation Layer (Pydantic V2)"
-    In[Input JSON] -->|model_validate| Request[StockRequest Model]
+```graph TD
+    Client((Client)) --> Input[Raw JSON]
+    Input --> Pydantic{Pydantic V2<br/>Strict Validator}
+    
+    Pydantic -->|Valid Ticker| API[Stock Market API]
+    API -->|Historical Data| Mapper(DataMapper)
+    
+    subgraph "Prophet 1.2 Core"
+        Mapper --> P_Fit[Fit Model]
+        P_Fit --> P_Future[Make Future DF]
+        P_Future --> P_Predict[Predict 7 Days]
     end
-
-    subgraph "Prediction Engine (Prophet 1.2)"
-    Request -->|DataMapper| DF_Train[Train DataFrame (ds, y)]
-    DF_Train -->|fit()| Model[Prophet 1.2 Model]
-    Model -->|make_future_dataframe| DF_Future[Future DataFrame]
-    DF_Future -->|predict()| Forecast[Forecast DataFrame]
-    end
-
-    subgraph "Output Layer"
-    Forecast -->|Extract yhat_7d| Response[PredictionResponse Model]
-    Response -->|model_dump| Out[JSON Response]
-    end
+    
+    P_Predict --> Output[JSON Response]
+    Output --> Client
 ```
 
 ## 🏗 Architecture
