@@ -28,11 +28,30 @@
 | Component  | Technology | Version  | Description                                     |
 | :--------- | :--------- | :------- | :---------------------------------------------- |
 | Frontend   | Next.js    | 16.1.1   | React 19, Server Components, Tailwind CSS       |
-| Backend    | FastAPI    | 0.109+   | Python 3.14, Pydantic v2                        |
+| Backend    | FastAPI    |          | Python 3.14, Pydantic v2                        |
 | ML Engine  | Prophet    | 1.1.5    | Time-series forecasting                         |
 | NLP Engine | FinBERT    | ProsusAI | Financial Sentiment Analysis (via Hugging Face) |
 | Database   | LibSQL     | Latest   | Distributed SQLite (Turso compatible)           |
 | Container  | Docker     | 24+      | Containerization for local dev & Render         |
+
+
+```graph LR
+    subgraph "Validation Layer (Pydantic V2)"
+    In[Input JSON] -->|model_validate| Request[StockRequest Model]
+    end
+
+    subgraph "Prediction Engine (Prophet 1.2)"
+    Request -->|DataMapper| DF_Train[Train DataFrame (ds, y)]
+    DF_Train -->|fit()| Model[Prophet 1.2 Model]
+    Model -->|make_future_dataframe| DF_Future[Future DataFrame]
+    DF_Future -->|predict()| Forecast[Forecast DataFrame]
+    end
+
+    subgraph "Output Layer"
+    Forecast -->|Extract yhat_7d| Response[PredictionResponse Model]
+    Response -->|model_dump| Out[JSON Response]
+    end
+```
 
 ## 🏗 Architecture
 
