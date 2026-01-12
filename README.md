@@ -16,10 +16,56 @@ The system follows a **Microservices** pattern, separating the UI, Calculation E
 
 ```mermaid
 graph TD
-    User -->|HTTPS| NextJS[Frontend (Next.js 16)]
-    NextJS -->|JSON| FastAPI[Backend (FastAPI)]
-    FastAPI -->|Read/Write| DB[(Turso / SQLite)]
-    FastAPI -->|Inference| HF[Hugging Face (FinBERT)]
-    FastAPI -->|Forecast| Prophet[Facebook Prophet]
-    GitHub[GitHub Actions] -->|Cron 6AM| Script[Automation Bot]
-    Script -->|Alerts| Email[Gmail SMTP]
+    %% --- STYLING ---
+    classDef frontend fill:#000000,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef backend fill:#2D3748,stroke:#4FD1C5,stroke-width:2px,color:#fff;
+    classDef db fill:#2C5282,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef external fill:#E2E8F0,stroke:#2D3748,stroke-width:1px,color:#000;
+    classDef automation fill:#9B2C2C,stroke:#F687B3,stroke-width:2px,color:#fff;
+
+    %% --- ACTORS ---
+    User((👤 User))
+
+    %% --- FRONTEND (VERCEL) ---
+    subgraph Client_Side ["Frontend Layer - Vercel"]
+        NextJS[Next.js 16.1.1<br/>React 19 + ShadCN UI]:::frontend
+    end
+
+    %% --- BACKEND (RENDER) ---
+    subgraph Server_Side ["Backend Layer - Render Docker"]
+        FastAPI[FastAPI<br/>Python 3.14.2]:::backend
+        Prophet[Facebook Prophet - Forecasting Engine]:::backend
+        Cache[Sentiment Cache - Logic]:::backend
+    end
+
+    %% --- DATABASE (TURSO) ---
+    subgraph Storage ["Persistence Layer - Turso"]
+        Turso[(LibSQL / Turso<br/>Distributed SQLite)]:::db
+    end
+
+    %% --- AUTOMATION (GITHUB) ---
+    subgraph Worker ["Automation Layer - GitHub Actions"]
+        Action[Daily Cron Job<br/>6:00 AM UTC]:::automation
+        Script[Headless Script<br/>Python 3.14]:::automation
+    end
+
+    %% --- EXTERNAL APIS ---
+    subgraph External ["External APIs"]
+        Yahoo[Yahoo Finance - yfinance]:::external
+        HF[Hugging Face API - FinBERT Sentiment]:::external
+        Gmail[Gmail SMTP - Email Alerts]:::external
+    end
+
+    %% --- CONNECTIONS ---
+    User -->|HTTPS| NextJS
+    NextJS -->|JSON / REST| FastAPI
+    
+    FastAPI -->|Read/Write| Turso
+    FastAPI -->|Load Data| Prophet
+    FastAPI -->|Fetch News| Yahoo
+    FastAPI -->|Analyze Text| HF
+    
+    Action -->|Triggers| Script
+    Script -->|Read Watchlist| Turso
+    Script -->|Fetch Price| Yahoo
+    Script -->|Send Alert| Gmail
