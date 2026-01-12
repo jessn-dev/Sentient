@@ -8,7 +8,29 @@
 
 **Sentient** is a microservices-based application that forecasts stock prices 7 days into the future using Facebook Prophet and analyzes market sentiment using FinBERT. It is architected to run entirely on **Free Tier** infrastructure.
 
+✨ Features
+----------
+
+*   **7-Day Price Forecast:** Uses additive regression models (Prophet) to predict future trends.
+    
+*   **AI Sentiment Analysis:** Scores news headlines from -1 (Bearish) to +1 (Bullish) using FinBERT.
+    
+*   **Smart Caching:** Implements "Cache-Aside" pattern with Turso DB to minimize API costs.
+    
+*   **Zero-Cost Architecture:** Runs on Vercel (Frontend), Render (Backend), and GitHub Actions (Automation).
+    
+*   **Automated Watchlist:** Headless "Morning Robot" checks your portfolio daily at 6:00 AM.
+
 ---
+
+🛠 Tech Stack
+
+| **Frontend** | Next.js | `16.1.1` | React 19, Server Components, Tailwind CSS |
+| **Backend** | FastAPI | `0.109+` | Python 3.14, Pydantic v2 |
+| **ML Engine** | Prophet | `1.1.5` | Time-series forecasting |
+| **NLP Engine** | FinBERT | `ProsusAI` | Financial Sentiment Analysis (via Hugging Face) |
+| **Database** | LibSQL | `Latest` | Distributed SQLite (Turso compatible) |
+| **Container** | Docker | `24+` | Containerization for local dev & Render |
 
 ## 🏗 Architecture
 
