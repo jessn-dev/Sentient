@@ -69,3 +69,19 @@ graph TD
     Script -->|Read Watchlist| Turso
     Script -->|Fetch Price| Yahoo
     Script -->|Send Alert| Gmail
+```
+## 📈 Scalability Roadmap (From MVP to Enterprise)
+
+Sentient is built on a **Cloud-Agnostic Microservices Architecture**. While the current deployment utilizes free-tier services, the decoupled nature of the system allows individual components to be upgraded to paid enterprise infrastructure without rewriting the core codebase.
+
+| Component | Current (Free Tier) | Upgrade Path (Paid/Enterprise) | Benefit of Upgrade |
+| :--- | :--- | :--- | :--- |
+| **Backend** | **Render (Free)**<br>*(Spins down after 15m idle)* | **AWS Fargate / Render Team**<br>*(Always-on Docker Containers)* | Eliminates 50s "Cold Start" latency; supports auto-scaling based on CPU load. |
+| **Database** | **Turso (Starter)**<br>*(9B Reads/Month)* | **Turso (Scaler) / AWS RDS**<br>*(Dedicated IOPS)* | Dedicated compute resources; Point-in-time backups; Multi-region replication for global speed. |
+| **AI Inference** | **Hugging Face API**<br>*(Rate Limited, Public Queue)* | **AWS SageMaker / Private Endpoints**<br>*(Dedicated GPU)* | Zero queue times; guarantees <100ms latency; ensures data privacy (inputs not shared with public API). |
+| **Automation** | **GitHub Actions**<br>*(2,000 mins/month)* | **AWS Lambda + EventBridge**<br>*(Serverless Functions)* | Decouples automation from source control; allows for event-driven triggers (e.g., run prediction immediately when news breaks). |
+| **Frontend** | **Vercel (Hobby)**<br>*(Bandwidth Limits)* | **Vercel Pro / AWS CloudFront**<br>*(Global Edge Cache)* | Enterprise SLA; DDOS protection; Multi-team collaboration features. |
+
+### 🔄 Migration Strategy
+1.  **Docker-First Design:** Since both Backend and Automation are containerized, moving from Render to AWS ECS or Kubernetes (EKS) requires only configuration changes, not code changes.
+2.  **Database Abstraction:** The `db_handler.py` module uses an Adapter Pattern. Switching from SQLite/Turso to PostgreSQL requires changing only one driver dependency, not the business logic.
