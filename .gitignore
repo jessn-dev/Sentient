@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Environment Variables (CRITICAL)
+.env
+.env.local
+.env.*.local
+
+# Next.js
+.next/
+node_modules/
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db

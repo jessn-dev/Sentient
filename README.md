@@ -130,3 +130,7 @@ Sentient is built on a **Cloud-Agnostic Microservices Architecture**. While the 
 ### 🔄 Migration Strategy
 1.  **Docker-First Design:** Since both Backend and Automation are containerized, moving from Render to AWS ECS or Kubernetes (EKS) requires only configuration changes, not code changes.
 2.  **Database Abstraction:** The `db_handler.py` module uses an Adapter Pattern. Switching from SQLite/Turso to PostgreSQL requires changing only one driver dependency, not the business logic.
+
+
+With all the updates, let us review and update the documentation, including specifications for the Financial Data Structure, Data Cleaning Pipeline, and Cross-Validation Strategy, to reflect Pydantic v2.12.5 and Prophet 1.2. features, describe the tech stack (updated to the most recent stable version as of dec 2025),
+data flow diagram, generate the architecture frontend+backend, the scalability roadmap (from MVP to enterprise), and the migration strategy
