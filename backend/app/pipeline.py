@@ -17,8 +17,12 @@ class DataCleaner:
         data = [r.model_dump() for r in records]
         df = pd.DataFrame(data)
 
-        # 2. Setup Index
+        # 2. Setup Index & Handle Timezones
+        # Prophet requires naive datetimes (no UTC/-05:00 info)
         df['ds'] = pd.to_datetime(df['timestamp'])
+        if df['ds'].dt.tz is not None:
+            df['ds'] = df['ds'].dt.tz_localize(None)
+
         df = df.sort_values('ds').set_index('ds')
 
         # 3. Reindex to Daily Frequency (exposing gaps)

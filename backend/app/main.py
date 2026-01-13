@@ -2,6 +2,7 @@ import random
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from .providers import DataProvider
 
 from .schemas import StockRequest, PredictionResponse, MarketRecord
 from .engine import PredictionEngine
@@ -19,28 +20,56 @@ app.add_middleware(
 )
 
 # --- MOCK DATA GENERATOR (For Testing) ---
-def generate_mock_history(symbol: str) -> list[MarketRecord]:
-    """Generates 2 years of fake stock data for testing."""
-    records = []
-    price = 150.0
-    start_date = datetime.now() - timedelta(days=730)
+# def generate_mock_history(symbol: str) -> list[MarketRecord]:
+#     """Generates 2 years of fake stock data for testing."""
+#     records = []
+#     price = 150.0
+#     start_date = datetime.now() - timedelta(days=730)
+#
+#     for i in range(730):
+#         current_date = start_date + timedelta(days=i)
+#         # Random walk
+#         change = random.uniform(-2.0, 2.5)
+#         price += change
+#         price = max(1.0, price) # Ensure no negative prices
+#
+#         records.append(MarketRecord(
+#             timestamp=current_date,
+#             open=price,
+#             high=price + 1.0,
+#             low=price - 1.0,
+#             close=price,
+#             volume=random.randint(1000, 50000)
+#         ))
+#     return records
 
-    for i in range(730):
-        current_date = start_date + timedelta(days=i)
-        # Random walk
-        change = random.uniform(-2.0, 2.5)
-        price += change
-        price = max(1.0, price) # Ensure no negative prices
+@app.post("/predict", response_model=PredictionResponse)
+async def predict_stock(request: StockRequest):
+    """
+    Real Data Pipeline:
+    1. Validation (Pydantic)
+    2. Ingestion (Yahoo Finance)
+    3. Cleaning (Pandas)
+    4. Forecasting (Prophet 1.2)
+    """
+    try:
+        # 1. Fetch REAL Data
+        # We assume NASDAQ/NYSE are covered by default ticker symbols in Yahoo
+        history = DataProvider.fetch_history(request.symbol)
 
-        records.append(MarketRecord(
-            timestamp=current_date,
-            open=price,
-            high=price + 1.0,
-            low=price - 1.0,
-            close=price,
-            volume=random.randint(1000, 50000)
-        ))
-    return records
+        # 2. Run Engine (Prophet)
+        engine = PredictionEngine()
+        result = engine.predict(request, history)
+
+        return result
+
+    except ValueError as e:
+        # Handle "Symbol not found" gracefully
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        # Log the actual error for debugging
+        print(f"Server Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal Prediction Error")
 
 # --- ROUTES ---
 

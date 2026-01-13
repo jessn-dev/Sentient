@@ -13,13 +13,19 @@ class StockExchange(str, Enum):
     SSE = "SSE"
 
 # Reusable Validator: Upper case string, 1-5 chars
-TickerSymbol = Annotated[str, Field(min_length=1, max_length=5, pattern=r"^[A-Z]+$")]
+TickerSymbol = Annotated[str, Field(min_length=1, max_length=10, pattern=r"^[A-Z]+$")]
 
 # --- Input Models ---
 class StockRequest(BaseModel):
-    model_config = ConfigDict(strict=True, str_strip_whitespace=True)
+    model_config = ConfigDict(str_strip_whitespace=True)
 
-    symbol: TickerSymbol
+    # 1. Ensure max_length covers your test cases (e.g. 5 for AAPL, 6 for GOOGLE?)
+    # If testing with "GOOGLE", change max_length to 6 or 10.
+    symbol: Annotated[str, Field(min_length=1, max_length=10, pattern=r"^[A-Z]+$")]
+
+    # 2. Ensure 'query_date' is REMOVED or Optional
+    # query_date: date  <-- DELETE THIS LINE
+
     exchange: StockExchange = StockExchange.NASDAQ
 
 # --- Internal Data Structures ---

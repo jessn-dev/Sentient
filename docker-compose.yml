@@ -12,20 +12,22 @@ services:
       - redis  # This must match the service name below (line 28)
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-#  # 2. Frontend (Next.js 16)
-#  web:
-#    build: ./frontend
-#    container_name: stock-web
-#    ports:
-#      - "3000:3000"
-#    volumes:
-#      - ./frontend/src:/app/src
-#    environment:
-#      - NEXT_PUBLIC_API_URL=http://localhost:8000
-#    depends_on:
-#      - api
-#    command: npm run dev
-#
+  # 2. Frontend (Next.js 16)
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: stock-web
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend/src:/app/src
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - api
+    command: npm run dev
+
   # 3. Cache Layer (Redis 8.4)
   redis:  # <--- THIS MUST BE LEFT-ALIGNED (No spaces before it)
     image: redis:8.4.0-alpine
