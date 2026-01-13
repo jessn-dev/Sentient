@@ -1,41 +1,78 @@
-import yfinance as yf
-from datetime import datetime
-from typing import List
-import pandas as pd
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockBarsRequest, StockSnapshotRequest # Added SnapshotRequest
+from alpaca.data.timeframe import TimeFrame
+from datetime import datetime, timedelta
+from typing import Dict, Any
+
+from .config import settings
 from .schemas import MarketRecord
 
 class DataProvider:
-    @staticmethod
-    def fetch_history(symbol: str, period: str = "2y") -> List[MarketRecord]:
-        """
-        Fetches historical data from Yahoo Finance and maps it to our strict Pydantic model.
-        """
-        # 1. Fetch from Yahoo
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(period=period)
+    def __init__(self):
+        self.client = StockHistoricalDataClient(
+            settings.ALPACA_API_KEY,
+            settings.ALPACA_SECRET_KEY.get_secret_value()
+        )
 
-        if df.empty:
-            raise ValueError(f"No data found for symbol '{symbol}'. It may be delisted or invalid.")
+    def fetch_data(self, symbol: str) -> Dict[str, Any]:
+        """
+        Fetches 2 years of daily bars + Snapshot info from Alpaca.
+        """
+        # 1. Fetch History (Bars)
+        request_params = StockBarsRequest(
+            symbol_or_symbols=[symbol],
+            timeframe=TimeFrame.Day,
+            start=datetime.now() - timedelta(days=730)
+        )
 
+        try:
+            bars = self.client.get_stock_bars(request_params)
+            df = bars.df
+
+            if df.empty:
+                raise ValueError(f"No data found for {symbol}")
+
+            df = df.reset_index()
+        except Exception as e:
+            raise ValueError(f"Alpaca Error: {str(e)}")
+
+        # 2. Map History
         records = []
-
-        # 2. Iterate and Map (Pandas iterrows is slow for millions of rows, but fine for 700 days)
-        for date_idx, row in df.iterrows():
-            # Yahoo returns the Index as Timestamp/Datetime
-
-            # 3. Handle potential NaN values (Yahoo sometimes has bad data days)
-            if any(pd.isna(row[col]) for col in ['Open', 'High', 'Low', 'Close', 'Volume']):
-                continue
-
+        for _, row in df.iterrows():
             records.append(
                 MarketRecord(
-                    timestamp=date_idx.to_pydatetime(), # Convert Pandas Timestamp to Python datetime
-                    open=float(row['Open']),
-                    high=float(row['High']),
-                    low=float(row['Low']),
-                    close=float(row['Close']),
-                    volume=int(row['Volume'])
+                    timestamp=row['timestamp'].to_pydatetime(),
+                    open=float(row['open']),
+                    high=float(row['high']),
+                    low=float(row['low']),
+                    close=float(row['close']),
+                    volume=int(row['volume'])
                 )
             )
 
-        return records
+        # 3. Fetch Snapshot (Metadata)
+        try:
+            # FIX: Use correct attributes (.open instead of .o)
+            snapshot_req = StockSnapshotRequest(symbol_or_symbols=symbol)
+            snapshot = self.client.get_stock_snapshot(snapshot_req)[symbol]
+
+            # Check if daily_bar exists to avoid crashes on new/inactive stocks
+            if snapshot.daily_bar:
+                info = {
+                    "open_price": snapshot.daily_bar.open,   # <--- FIX: .open
+                    "high_price": snapshot.daily_bar.high,   # <--- FIX: .high
+                    "low_price": snapshot.daily_bar.low,     # <--- FIX: .low
+                    "volume": snapshot.daily_bar.volume,     # <--- FIX: .volume
+                    "market_cap": None,
+                    "pe_ratio": None,
+                    "fifty_two_week_high": None,
+                    "fifty_two_week_low": None
+                }
+            else:
+                info = {}
+
+        except Exception as e:
+            print(f"Snapshot Error (Non-fatal): {str(e)}")
+            info = {}
+
+        return {"history": records, "info": info}

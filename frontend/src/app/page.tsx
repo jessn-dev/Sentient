@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { fetchPrediction, PredictionResponse } from '@/lib/api';
 import StockForm from '@/components/StockForm';
 import PredictionChart from '@/components/PredictionChart';
+import ExplanationCard from '@/components/ExplanationCard';
 import { TrendingUp, TrendingDown, Activity } from 'lucide-react';
 
 export default function Dashboard() {
@@ -85,6 +86,8 @@ export default function Dashboard() {
                 <div className="md:col-span-2">
                   <PredictionChart data={data} />
                 </div>
+                {/* Explanation here */}
+                <ExplanationCard text={data.explanation} />
 
               </div>
           )}

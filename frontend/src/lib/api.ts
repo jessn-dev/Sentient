@@ -8,6 +8,16 @@ export interface PredictionResponse {
     forecast_date: string;
     price_movement: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
     growth_percentage: number;
+    market_cap?: number;
+    pe_ratio?: number;
+    dividend_yield?: number;
+    fifty_two_week_high?: number;
+    fifty_two_week_low?: number;
+    open_price?: number;
+    high_price?: number;
+    low_price?: number;
+    volume?: number;
+    explanation: string;
 }
 
 export async function fetchPrediction(symbol: string): Promise<PredictionResponse> {

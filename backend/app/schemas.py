@@ -47,6 +47,18 @@ class PredictionResponse(BaseModel):
     confidence_score: float
     forecast_date: date
 
+    # "Overview" Data (Optional because some might be missing for certain stocks)
+    market_cap: float | None = None
+    pe_ratio: float | None = None
+    dividend_yield: float | None = None
+    fifty_two_week_high: float | None = None
+    fifty_two_week_low: float | None = None
+    volume: int | None = None
+    open_price: float | None = None
+    high_price: float | None = None
+    low_price: float | None = None
+    explanation: str | None = None
+
     @computed_field
     @property
     def price_movement(self) -> str:
