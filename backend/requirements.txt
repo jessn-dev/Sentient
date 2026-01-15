@@ -8,3 +8,5 @@ numpy==1.26.4         # FIXED: Must be < 2.0.0 for Pandas 2.2.0
 redis==5.2.0
 httpx==0.28.0  # For calling external Stock APIs
 alpaca-py==0.32.0
+feedparser==6.0.12
+yfinance==0.2.54

@@ -1,31 +1,26 @@
-import { PredictionResponse } from '@/lib/api';
+export default function StatsGrid({ data }: { data: any }) {
+    const stats = [
+        { label: 'Market Cap', value: data.market_cap ? `$${(data.market_cap / 1e9).toFixed(2)}B` : 'N/A' },
+        { label: 'P/E Ratio', value: data.pe_ratio?.toFixed(2) || 'N/A' },
+        { label: 'Volume', value: data.volume?.toLocaleString() || 'N/A' },
+        { label: '52W High', value: data.fifty_two_week_high ? `$${data.fifty_two_week_high}` : 'N/A' },
+        { label: '52W Low', value: data.fifty_two_week_low ? `$${data.fifty_two_week_low}` : 'N/A' },
+        { label: 'Open', value: `$${data.open_price}` },
+    ];
 
-const StatItem = ({ label, value }: { label: string; value: string }) => (
-    <div className="flex justify-between py-3 border-b border-gray-800">
-        <span className="text-gray-400 text-sm">{label}</span>
-        <span className="text-white font-medium">{value}</span>
-    </div>
-);
-
-// Helper to format large numbers (e.g. 4.49T)
-const formatCompact = (num?: number) => {
-    if (!num) return '-';
-    return Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 2 }).format(num);
-};
-
-export default function StatsGrid({ data }: { data: PredictionResponse }) {
     return (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-12 gap-y-2 mt-8 bg-[#1e1e1e] p-6 rounded-xl">
-            <StatItem label="Open" value={data.open_price?.toFixed(2) || '-'} />
-            <StatItem label="High" value={data.high_price?.toFixed(2) || '-'} />
-            <StatItem label="Low" value={data.low_price?.toFixed(2) || '-'} />
-
-            <StatItem label="Mkt cap" value={formatCompact(data.market_cap)} />
-            <StatItem label="P/E ratio" value={data.pe_ratio?.toFixed(2) || '-'} />
-            <StatItem label="Div yield" value={data.dividend_yield ? `${(data.dividend_yield * 100).toFixed(2)}%` : '-'} />
-
-            <StatItem label="52-wk high" value={data.fifty_two_week_high?.toFixed(2) || '-'} />
-            <StatItem label="52-wk low" value={data.fifty_two_week_low?.toFixed(2) || '-'} />
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            {stats.map((stat) => (
+                // CHANGED: bg-white -> bg-[#1e293b], border-gray-100 -> border-slate-700
+                <div key={stat.label} className="bg-[#1e293b] p-4 rounded-xl border border-slate-700 shadow-sm">
+                    <div className="text-slate-500 text-xs font-medium uppercase tracking-wider mb-1">
+                        {stat.label}
+                    </div>
+                    <div className="text-slate-100 text-lg font-semibold">
+                        {stat.value}
+                    </div>
+                </div>
+            ))}
         </div>
     );
 }

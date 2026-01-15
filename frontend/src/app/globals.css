@@ -1,8 +1,11 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Ocean Theme Variables */
+  --background: #0f172a;
+  --foreground: #e2e8f0;
+  --card-bg: #1e293b;
+  --card-border: #334155;
 }
 
 @theme inline {
@@ -20,7 +23,7 @@
 }
 
 body {
-  background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--background);
+  min-height: 100vh;
 }
