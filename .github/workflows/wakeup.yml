@@ -1,0 +1,34 @@
+name: Wake Up Production API
+
+on:
+  # 1. MANUAL TRIGGER (Fallback)
+  # Allows you to click a button in GitHub to wake it up instantly before a demo.
+  workflow_dispatch:
+
+  # 2. SCHEDULED TRIGGER (Cron)
+  schedule:
+    # "At minute 0, 15, 30, 45 past hour 13 through 23 (8am-6pm EST) on Mon-Fri"
+    # Adjust '13-23' to match your working hours in UTC!
+    # Render sleeps after 15 mins, so running every 14 mins prevents sleep.
+    - cron: '*/14 13-23 * * 1-5'
+
+jobs:
+  wake_api:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Requests
+        run: pip install requests
+
+      - name: Run Waker Script
+        env:
+          # Pull the URL from your Secrets, or fallback to the script's default
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+        run: python backend/scripts/wake_up.py
