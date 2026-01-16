@@ -6,7 +6,7 @@ interface QuoteData {
     symbol: string;
     price: number;
     change_percent: number;
-    is_market_open: bool;
+    is_market_open: boolean;
 }
 
 interface Props {

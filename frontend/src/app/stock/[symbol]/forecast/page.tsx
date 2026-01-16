@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useState, use } from 'react'; // <--- Import 'use'
+import { useEffect, useState, use } from 'react';
 import { fetchPrediction, PredictionResponse } from '@/lib/api';
 import PredictionChart from '@/components/PredictionChart';
 import ExplanationCard from '@/components/ExplanationCard';
+import SaveForecastWidget from '@/components/SaveForecastWidget';
 import { TrendingUp, Activity } from 'lucide-react';
 
 export default function ForecastPage({ params }: { params: Promise<{ symbol: string }> }) {
-    // 1. Unwrap params
+    // 1. Unwrap params (Next.js 15+ fix)
     const { symbol } = use(params);
 
     const [data, setData] = useState<PredictionResponse | null>(null);
@@ -21,15 +22,20 @@ export default function ForecastPage({ params }: { params: Promise<{ symbol: str
             .finally(() => setLoading(false));
     }, [symbol]);
 
-    // ... (keep the rest of your return statement the same) ...
     if (loading) return <div className="text-slate-400 p-8">Running Prophet AI Models...</div>;
     if (error) return <div className="text-red-400 p-8">Error: {error}</div>;
     if (!data) return null;
 
+    // Calculate 7 days from now for the target date
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + 7);
+
     return (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
-            {/* ... existing JSX ... */}
+
+            {/* 1. KEY METRICS */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Price Target Card */}
                 <div className="bg-[#1e293b] border border-slate-700 p-6 rounded-xl shadow-lg">
                     <div className="flex items-center justify-between mb-2">
                         <span className="text-slate-400 font-medium text-sm">7-Day Price Target</span>
@@ -43,6 +49,7 @@ export default function ForecastPage({ params }: { params: Promise<{ symbol: str
                     </div>
                 </div>
 
+                {/* Confidence Card */}
                 <div className="bg-[#1e293b] border border-slate-700 p-6 rounded-xl shadow-lg">
                     <div className="flex items-center justify-between mb-2">
                         <span className="text-slate-400 font-medium text-sm">Model Confidence</span>
@@ -55,12 +62,28 @@ export default function ForecastPage({ params }: { params: Promise<{ symbol: str
                 </div>
             </div>
 
-            <div className="bg-[#1e293b] border border-slate-700 p-6 rounded-xl shadow-lg">
-                <h3 className="text-lg font-bold text-slate-100 mb-4">Prophet Model Visualization</h3>
-                <PredictionChart data={data} />
-            </div>
+            {/* 2. MAIN LAYOUT (Chart + Save Widget) */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Left Column: AI Chart & Explanation (Span 2) */}
+                <div className="lg:col-span-2 space-y-8">
+                    <div className="bg-[#1e293b] border border-slate-700 p-6 rounded-xl shadow-lg">
+                        <h3 className="text-lg font-bold text-slate-100 mb-4">Prophet Model Visualization</h3>
+                        <PredictionChart data={data} />
+                    </div>
+                    <ExplanationCard text={data.explanation} />
+                </div>
 
-            <ExplanationCard text={data.explanation} />
+                {/* Right Column: Save Widget (Span 1) */}
+                <div className="lg:col-span-1">
+                    <SaveForecastWidget
+                        symbol={symbol}
+                        currentPrice={data.current_price}
+                        predictedPrice={data.predicted_price_7d}
+                        confidence={data.confidence_score}
+                        targetDate={targetDate.toISOString()}
+                    />
+                </div>
+            </div>
         </div>
     );
 }
