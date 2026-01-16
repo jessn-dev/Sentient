@@ -1,17 +1,16 @@
-from sqlmodel import SQLModel, create_engine, Session
 import os
+from sqlmodel import create_engine, SQLModel, Session
 
-# We use an absolute path for the DB file to ensure Docker finds it in the volume
-# "sqlite:////app/data/predictions.db" maps to the volume we set up
-sqlite_file_name = "/app/data/predictions.db"
-sqlite_url = f"sqlite:///{sqlite_file_name}"
+# Default to SQLite for local, but allow env var for Prod
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./predictions.db")
 
-# check_same_thread=False is needed for SQLite with FastAPI
-engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
+# Fix: Postgres URLs usually start with "postgres://", SQLAlchemy needs "postgresql://"
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+engine = create_engine(DATABASE_URL)
 
 def create_db_and_tables():
-    # Ensure the directory exists
-    os.makedirs(os.path.dirname(sqlite_file_name), exist_ok=True)
     SQLModel.metadata.create_all(engine)
 
 def get_session():
