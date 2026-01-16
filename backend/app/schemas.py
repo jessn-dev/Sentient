@@ -22,6 +22,7 @@ class StockRequest(BaseModel):
     # 1. Ensure max_length covers your test cases (e.g. 5 for AAPL, 6 for GOOGLE?)
     # If testing with "GOOGLE", change max_length to 6 or 10.
     symbol: Annotated[str, Field(min_length=1, max_length=10, pattern=r"^[A-Z]+$")]
+    days: int = 7
 
     # 2. Ensure 'query_date' is REMOVED or Optional
     # query_date: date  <-- DELETE THIS LINE
