@@ -6,8 +6,10 @@ __pycache__/
 
 # Environment Variables (CRITICAL)
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+*.db
+*.sqlite3
 
 # Next.js
 .next/
@@ -17,3 +19,4 @@ npm-debug.log*
 # OS
 .DS_Store
 Thumbs.db
+.idea
