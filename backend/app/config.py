@@ -48,5 +48,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         # This allows you to override .env with real System Env Vars (important for Render)
         env_file_encoding = "utf-8"
+        # Ignore dev env vars that don't exist':
+        extra = "ignore"
 
 settings = Settings()

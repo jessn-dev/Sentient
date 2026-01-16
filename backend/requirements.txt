@@ -11,4 +11,5 @@ alpaca-py==0.32.0
 feedparser==6.0.12
 yfinance==0.2.54
 sqlmodel==0.0.14
-psycopg2-binary
+psycopg2-binary==2.9.11
+qstash==3.2.0
