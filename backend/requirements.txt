@@ -4,9 +4,9 @@ pydantic==2.12.5
 pydantic-settings==2.7.0
 prophet==1.2.1
 pandas==2.2.0
-numpy==2.0.0         # FIXED: Must be < 2.0.0 for Pandas 2.2.0
+numpy==1.26.4
 redis==5.2.0
-httpx==0.28.0  # For calling external Stock APIs
+httpx==0.28.0
 alpaca-py==0.32.0
 feedparser==6.0.12
 yfinance==0.2.54
