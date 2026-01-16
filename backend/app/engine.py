@@ -73,7 +73,7 @@ class PredictionEngine:
             return PredictionResponse(
                 symbol=request.symbol.upper(),
                 current_price=round(current_price, 2),
-                predicted_price=round(future_prediction, 2),
+                predicted_price_7d=round(future_prediction, 2),
                 forecast_date=forecast.iloc[-1]['ds'].date(),
                 confidence_score=round(confidence, 2),
                 explanation=explanation
