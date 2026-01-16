@@ -11,6 +11,8 @@ services:
       - ./backend/data:/app/data # <--- PERSIST THE DB HERE
     environment:
       - DATABASE_URL=sqlite:////app/data/predictions.db
+      - REDIS_URL=redis://redis:6379/0
+      - PORT=8000
     depends_on:
       - redis  # This must match the service name below (line 28)
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
