@@ -14,3 +14,4 @@ sqlmodel==0.0.14
 psycopg2-binary==2.9.11
 qstash==3.2.0
 pytest==9.0.2
+pyarrow==22.0.0

@@ -1,16 +1,16 @@
 import redis
 import logging
 import feedparser
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional
 from urllib.parse import quote
-import sys
+from contextlib import asynccontextmanager
 
 # FastAPI & SQLModel
 from fastapi import FastAPI, HTTPException, Query, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select, delete
-from qstash import Receiver  # For validating QStash webhooks
+from qstash import Receiver
 
 # Internal Modules
 from .config import settings
@@ -21,50 +21,65 @@ from .database import create_db_and_tables, get_session
 from .models import Prediction, SavePredictionRequest, NewsItem, QuoteResponse
 
 # Initialize Logger
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn")
 
-# Initialize FastAPI
-app = FastAPI(title=settings.APP_NAME, version="1.5.0")
+# --- LIFESPAN MANAGER (Replaces on_event) ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 1. Startup Logic
+    print("\n" + "="*60)
+    print(f"🚀  STARTING {settings.APP_NAME}")
+    print(f"🌍  ENVIRONMENT:  {settings.ENVIRONMENT}")
+
+    db_type = "POSTGRESQL (Production)" if "postgresql" in settings.DATABASE_URL else "SQLITE (Local)"
+    print(f"💾  DATABASE:     {db_type}")
+
+    # Check Redis Connection
+    redis_status = "DISABLED (Not Configured)"
+    if settings.REDIS_URL:
+        try:
+            test_redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
+            if test_redis.ping():
+                redis_status = f"CONNECTED ({settings.REDIS_URL})"
+        except Exception as e:
+            redis_status = f"ERROR: {e}"
+
+    print(f"⚡  REDIS:        {redis_status}")
+    print("="*60 + "\n")
+
+    create_db_and_tables()
+
+    yield # Application runs here
+
+    # 2. Shutdown Logic (Clean up resources if needed)
+    pass
+
+# --- FASTAPI SETUP ---
+app = FastAPI(
+    title=settings.APP_NAME,
+    version="1.6.0",
+    lifespan=lifespan # New method
+)
 
 # CORS Setup
+origins = [
+    "http://localhost:3000",                  # Local Dev
+    "https://your-vercel-project.vercel.app", # Vercel Frontend
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins, # Use specific list in Prod
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Redis Cache Setup
+# Redis Cache Client (Global)
 try:
     cache = redis.from_url(settings.REDIS_URL, decode_responses=True)
-    logger.info("✅ Redis connected successfully.")
-except Exception as e:
-    logger.warning(f"⚠️ Redis connection failed: {e}. Caching is disabled.")
+except Exception:
     cache = None
-
-# Initialize DB on Startup
-@app.on_event("startup")
-def on_startup():
-    # 1. Clear Console Banner
-    print("\n" + "="*60)
-    print(f"🚀  STARTING {settings.APP_NAME}")
-    print(f"🌍  ENVIRONMENT:  {settings.ENVIRONMENT}")
-
-    # 2. Database Check
-    db_type = "POSTGRESQL (Production)" if "postgresql" in settings.DATABASE_URL else "SQLITE (Local)"
-    print(f"💾  DATABASE: {db_type}")
-
-    # 3. Cache Check
-    if cache:
-        print(f"⚡  REDIS: CONNECTED ({settings.REDIS_URL})")
-    else:
-        print(f"⚠️   REDIS: DISABLED (Not Configured)")
-
-    print("="*60 + "\n")
-
-    # 4. Initialize Tables
-    create_db_and_tables()
 
 
 # --- HELPERS ---
@@ -91,7 +106,7 @@ def derive_ticker(text: str, default: str) -> str:
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "version": "1.5.0"}
+    return {"status": "ok", "version": "1.6.0"}
 
 
 @app.get("/quotes", response_model=Dict[str, QuoteResponse])
@@ -187,7 +202,8 @@ async def get_stock_news(symbol: str):
             else:
                 ticker = symbol.upper()
 
-            pub_time = int(datetime(*entry.published_parsed[:6]).timestamp()) if entry.published_parsed else int(datetime.utcnow().timestamp())
+            # Fix datetime warning
+            pub_time = int(datetime(*entry.published_parsed[:6], tzinfo=timezone.utc).timestamp()) if entry.published_parsed else int(datetime.now(timezone.utc).timestamp())
 
             results.append(NewsItem(
                 title=clean_title,
@@ -222,8 +238,8 @@ async def predict_stock(request: StockRequest):
         data = provider.fetch_data(symbol)
         engine = PredictionEngine()
         result = engine.predict(request, data["history"], data["info"])
-        # Strict 1 hour expiration.
-        # Even if you have heavy traffic, keys older than 1hr automatically vanish.
+
+        # Strict 1-hour TTL for memory management
         if cache: cache.set(cache_key, result.model_dump_json(), ex=3600)
         return result
     except Exception as e:
@@ -279,7 +295,7 @@ async def save_prediction(
         start_price=req.current_price,
         predicted_price=req.predicted_price,
         confidence_score=req.confidence_score,
-        saved_at=datetime.utcnow(),
+        saved_at=datetime.now(timezone.utc), # Fix datetime warning
         target_date=req.target_date
     )
     db.add(new_pred)
@@ -292,14 +308,14 @@ async def save_prediction(
 async def get_user_predictions(
         user_id: str,
         db: Session = Depends(get_session),
-        limit: int = 20 # <--- Default limit
+        limit: int = 20
 ):
-    """Fetch recent history (Limited to save Bandwidth)"""
+    """Fetch history of saved forecasts (Limit 20 for bandwidth)"""
     statement = (
         select(Prediction)
         .where(Prediction.user_id == user_id)
         .order_by(Prediction.saved_at.desc())
-        .limit(limit) # <--- Enforce limit
+        .limit(limit)
     )
     results = db.exec(statement).all()
     return results
@@ -313,7 +329,7 @@ async def validate_predictions(
         db: Session = Depends(get_session)
 ):
     """
-    Called by QStash once a day to validate expired predictions.
+    Called by QStash daily to validate expired predictions.
     """
     # 1. SECURITY: Verify the request comes from QStash
     if settings.QSTASH_CURRENT_SIGNING_KEY and settings.QSTASH_NEXT_SIGNING_KEY:
@@ -330,7 +346,7 @@ async def validate_predictions(
             raise HTTPException(status_code=401, detail="Invalid QStash Signature")
 
     # 2. FIND PENDING PREDICTIONS
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc) # Fix datetime warning
     statement = select(Prediction).where(
         Prediction.status == "ACTIVE",
         Prediction.target_date <= now
@@ -385,9 +401,9 @@ async def cleanup_old_data(
         db: Session = Depends(get_session)
 ):
     """
-    Weekly Job: Deletes old validated predictions to save DB space.
+    Weekly Job: Deletes validated predictions older than 30 days.
     """
-    # 1. SECURITY: Verify QStash
+    # 1. SECURITY
     if settings.QSTASH_CURRENT_SIGNING_KEY and settings.QSTASH_NEXT_SIGNING_KEY:
         try:
             receiver = Receiver(
@@ -400,9 +416,8 @@ async def cleanup_old_data(
         except Exception:
             raise HTTPException(status_code=401, detail="Invalid Signature")
 
-    # 2. DEFINE RETENTION POLICY (e.g., 30 Days)
-    # We only delete records that are 'VALIDATED' (completed) and older than 30 days
-    cutoff_date = datetime.utcnow() - timedelta(days=30)
+    # 2. RETENTION POLICY (30 Days)
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=30) # Fix datetime warning
 
     statement = delete(Prediction).where(
         Prediction.status == "VALIDATED",
@@ -413,10 +428,5 @@ async def cleanup_old_data(
     db.commit()
 
     deleted_count = result.rowcount if hasattr(result, "rowcount") else "Unknown"
-
-    # 3. OPTIONAL: FLUSH REDIS IF MEMORY IS HIGH
-    # (Redis usually handles this with TTL, but we can force a clear if needed)
-    # if cache:
-    #     cache.flushdb()
 
     return {"status": "cleanup_complete", "deleted_rows": deleted_count}

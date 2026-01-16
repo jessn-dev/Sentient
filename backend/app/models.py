@@ -1,5 +1,5 @@
 from sqlmodel import SQLModel, Field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 # --- DATABASE TABLE ---
@@ -14,7 +14,7 @@ class Prediction(SQLModel, table=True):
     confidence_score: float      # The AI's confidence
 
     # Dates
-    saved_at: datetime = Field(default_factory=datetime.utcnow)
+    start_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     target_date: datetime        # When we validate this (7 days later)
 
     # Status
