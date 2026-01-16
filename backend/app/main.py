@@ -343,7 +343,12 @@ async def validate_predictions(
             )
             body = await request.body()
             signature = request.headers.get("Upstash-Signature")
-            receiver.verify(body.decode(), signature)
+
+            # ⚠️ FIX: Use Keyword Arguments (body=..., signature=...)
+            receiver.verify(
+                body=body.decode(),
+                signature=signature
+            )
         except Exception as e:
             logger.error(f"⚠️ QStash Verification Failed: {e}")
             raise HTTPException(status_code=401, detail="Invalid QStash Signature")
@@ -415,8 +420,14 @@ async def cleanup_old_data(
             )
             body = await request.body()
             signature = request.headers.get("Upstash-Signature")
-            receiver.verify(body.decode(), signature)
-        except Exception:
+
+            # ⚠️ FIX: Use Keyword Arguments here too
+            receiver.verify(
+                body=body.decode(),
+                signature=signature
+            )
+        except Exception as e:
+            logger.error(f"⚠️ QStash Verification Failed: {e}")
             raise HTTPException(status_code=401, detail="Invalid Signature")
 
     # 2. RETENTION POLICY (30 Days)
