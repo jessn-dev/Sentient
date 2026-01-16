@@ -473,10 +473,10 @@ def get_redis_client():
 # Initialize Global Cache
 cache = get_redis_client()
 
-
 # --- LIFESPAN MANAGER ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global cache
     # 1. Startup Logic
     print("\n" + "="*60)
     print(f"🚀  STARTING {settings.APP_NAME}")
@@ -496,7 +496,6 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             redis_status = f"ERROR: {e}"
             # If ping fails, disable cache to prevent runtime errors
-            global cache
             cache = None
 
     print(f"⚡  REDIS:        {redis_status}")
