@@ -23,6 +23,18 @@ class Settings(BaseSettings):
     QSTASH_CURRENT_SIGNING_KEY: str = ""
     QSTASH_NEXT_SIGNING_KEY: str = ""
 
+    # CORS (Default to localhost for safety)
+    ALLOWED_ORIGINS: str = "http://localhost:3000"
+
+@property
+def cors_origins(self) -> list[str]:
+    return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
+
+class Config:
+    env_file = ".env"
+    env_file_encoding = "utf-8"
+    extra = "ignore"
+
     # Validation Logic
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

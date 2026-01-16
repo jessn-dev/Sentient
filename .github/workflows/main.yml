@@ -36,7 +36,7 @@ jobs:
     - name: Run Tests
       # If this fails, the pipeline STOPS here. Nothing gets deployed.
       run: |
-        pytest tests/
+        python -m pytest tests/
 
   # ------------------------------------------------------------------
   # JOB 2: DEPLOYMENT (CD)
