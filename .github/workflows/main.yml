@@ -1,0 +1,55 @@
+name: Production Pipeline
+
+# Trigger on push to main branch
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  # ------------------------------------------------------------------
+  # JOB 1: QUALITY ASSURANCE (CI)
+  # ------------------------------------------------------------------
+  test-backend:
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: ./backend
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip' # Caches dependencies so future runs are faster
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest httpx # Install test runner
+
+    - name: Run Tests
+      # If this fails, the pipeline STOPS here. Nothing gets deployed.
+      run: |
+        pytest tests/
+
+  # ------------------------------------------------------------------
+  # JOB 2: DEPLOYMENT (CD)
+  # ------------------------------------------------------------------
+  deploy-backend:
+    needs: test-backend # Wait for tests to pass
+    if: github.ref == 'refs/heads/main' # Only deploy main branch
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Trigger Render Deploy
+        run: curl "${{ secrets.RENDER_DEPLOY_HOOK }}"
+
+  # Note: Vercel (Frontend) handles its own CI automatically.
+  # If you connect Vercel to your GitHub repo, it will auto-deploy
+  # the frontend whenever you push.
