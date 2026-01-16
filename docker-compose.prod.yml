@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # BACKEND API
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: stock_api_prod
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      # --- CORE SETTINGS ---
+      - APP_NAME=MarketMind AI (Prod)
+      - ENVIRONMENT=PRODUCTION  # Triggers strict config checks (Requires real DB)
+
+      # --- DATABASE (CLOUD) ---
+      # Replace this with your Supabase Connection String
+      # Format: postgresql://user:password@host:port/database
+      - DATABASE_URL=${DATABASE_URL}
+
+      # --- CACHE (LOCAL CONTAINER) ---
+      - REDIS_URL=redis://redis:6379/0
+
+      # --- API KEYS (Pass these from your server's .env file) ---
+      - ALPACA_API_KEY=${ALPACA_API_KEY}
+      - ALPACA_SECRET_KEY=${ALPACA_SECRET_KEY}
+#      - OPENAI_API_KEY=${OPENAI_API_KEY}
+
+      # --- QSTASH (SCHEDULING) ---
+      - QSTASH_CURRENT_SIGNING_KEY=${QSTASH_CURRENT_SIGNING_KEY}
+      - QSTASH_NEXT_SIGNING_KEY=${QSTASH_NEXT_SIGNING_KEY}
+
+    depends_on:
+      - redis
+
+  # ---------------------------------------------------------------------------
+  # FRONTEND WEB
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # ⚠️ CRITICAL: This MUST be the Public IP or Domain of your server.
+        # Browsers need to know where to send requests.
+        # Example: http://159.203.x.x:8000 or https://api.mydomain.com
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    container_name: stock_web_prod
+    restart: always
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  # ---------------------------------------------------------------------------
+  # REDIS CACHE
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:alpine
+    container_name: stock_redis_prod
+    restart: always
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+
+# ---------------------------------------------------------------------------
+# VOLUMES
+# ---------------------------------------------------------------------------
+volumes:
+  redis_data:
