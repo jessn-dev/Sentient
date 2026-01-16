@@ -126,3 +126,6 @@ class DataProvider:
             }
         except:
             return {"sector": "Unknown", "industry": "Unknown"}
+
+
+        redis-cli --tls -u 

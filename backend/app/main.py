@@ -1,6 +1,7 @@
 import redis
 import logging
 import feedparser
+import ssl
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional
 from urllib.parse import quote
@@ -432,3 +433,81 @@ async def cleanup_old_data(
     deleted_count = result.rowcount if hasattr(result, "rowcount") else "Unknown"
 
     return {"status": "cleanup_complete", "deleted_rows": deleted_count}
+
+# --- HELPER: SMART REDIS CONNECTION ---
+def get_redis_client():
+    """
+    Connects to Redis with logic for both Local (plain) and Cloud (SSL).
+    """
+    if not settings.REDIS_URL:
+        return None
+
+    try:
+        # 1. Handle Upstash/Cloud SSL quirks
+        # If we are using a secure connection (rediss://) or a cloud provider,
+        # we need to disable strict SSL checking to avoid "certificate verify failed"
+        # errors in minimal Docker containers.
+        ssl_context = None
+        url = settings.REDIS_URL
+
+        # Auto-upgrade to rediss:// if we detect an Upstash URL but user forgot 's'
+        if "upstash" in url and url.startswith("redis://"):
+            url = url.replace("redis://", "rediss://", 1)
+
+        # Configure connection args
+        connection_kwargs = {
+            "decode_responses": True,
+            "socket_timeout": 5  # Don't hang forever if Redis is down
+        }
+
+        # If secure, relax SSL requirements
+        if url.startswith("rediss://"):
+            connection_kwargs["ssl_cert_reqs"] = None
+
+        return redis.from_url(url, **connection_kwargs)
+
+    except Exception as e:
+        logger.warning(f"⚠️ Redis config invalid: {e}")
+        return None
+
+# Initialize Global Cache
+cache = get_redis_client()
+
+
+# --- LIFESPAN MANAGER ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 1. Startup Logic
+    print("\n" + "="*60)
+    print(f"🚀  STARTING {settings.APP_NAME}")
+    print(f"🌍  ENVIRONMENT:  {settings.ENVIRONMENT}")
+
+    db_type = "POSTGRESQL (Production)" if "postgresql" in settings.DATABASE_URL else "SQLITE (Local)"
+    print(f"💾  DATABASE:     {db_type}")
+
+    # 2. Test Redis Connection
+    redis_status = "DISABLED (Not Configured)"
+    if cache:
+        try:
+            if cache.ping():
+                # Hide the password in logs
+                safe_url = settings.REDIS_URL.split("@")[-1] if "@" in settings.REDIS_URL else settings.REDIS_URL
+                redis_status = f"CONNECTED ({safe_url})"
+        except Exception as e:
+            redis_status = f"ERROR: {e}"
+            # If ping fails, disable cache to prevent runtime errors
+            global cache
+            cache = None
+
+    print(f"⚡  REDIS:        {redis_status}")
+    print("="*60 + "\n")
+
+    create_db_and_tables()
+
+    yield # Application runs here
+
+    # 3. Shutdown Logic
+    if cache:
+        try:
+            cache.close()
+        except: pass
