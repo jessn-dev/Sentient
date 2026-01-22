@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timedelta, date
 import yfinance as yf
 import os
+import alpaca_trade_api as tradeapi
 
 from .database import create_db_and_tables, Prediction, get_session
 from .engine import PredictionEngine
@@ -17,7 +18,6 @@ PRICE_CACHE: Dict[str, Dict] = {}
 CACHE_TTL = 300  # 5 Minutes
 
 # --- ALPACA SETUP ---
-import alpaca_trade_api as tradeapi
 ALPACA_KEY = os.environ.get("ALPACA_KEY")
 ALPACA_SECRET = os.environ.get("ALPACA_SECRET")
 ALPACA_URL = "https://paper-api.alpaca.markets"
