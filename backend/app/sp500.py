@@ -22,7 +22,7 @@ def get_sp500_tickers():
         # 2. Fetch with Headers (Fixes 403 Forbidden)
         url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
         headers = {
-            "User-Agent": "MarketMindAI/1.0 (Educational Project; contact@example.com)"
+            "User-Agent": "SentientAI (Educational Project; contact@example.com)"
         }
 
         response = requests.get(url, headers=headers)

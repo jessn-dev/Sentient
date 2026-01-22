@@ -76,6 +76,7 @@ class WatchlistPerformanceItem(BaseModel):
     current_price: float
     final_price: Optional[float] = None
     end_date: date
+    finalized_date: Optional[date] = None
     created_at: date
     accuracy_score: float
     status: str

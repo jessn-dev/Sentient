@@ -186,8 +186,20 @@ async def get_watchlist_performance(session: Session = Depends(get_session)):
     today_dt = date.today()
     active_symbols = []
 
+    # Helper: Find next valid market day (skip weekends)
+    def get_next_market_day(d: date) -> date:
+        # 5=Saturday, 6=Sunday
+        while d.weekday() > 4:
+            d += timedelta(days=1)
+        return d
+
     for p in predictions:
-        if p.final_price == 0.0 and today_dt <= p.end_date:
+        # Determine the actual "Check Date"
+        # If end_date is Sunday, check_date becomes Monday
+        check_date = get_next_market_day(p.end_date)
+
+        # If we haven't finalized yet, and today is NOT past the check date, it's active
+        if p.final_price == 0.0 and today_dt <= check_date:
             active_symbols.append(p.symbol)
 
     live_prices = get_live_prices(list(set(active_symbols))) if active_symbols else {}
@@ -197,28 +209,43 @@ async def get_watchlist_performance(session: Session = Depends(get_session)):
         current_val = 0.0
         is_finalized = False
 
-        # A. Finalized in DB
+        # Calculate the adjusted "Finalization Date" (Monday if weekend)
+        target_final_date = get_next_market_day(p.end_date)
+
+        # A. Already Finalized in DB
         if p.final_price > 0.0:
             current_val = p.final_price
             is_finalized = True
+
         # B. Needs Finalizing (Expired)
-        elif today_dt > p.end_date:
-            print(f"🔒 Finalizing {p.symbol}")
+        # We only finalize if today is ON or AFTER the adjusted Monday date
+        elif today_dt >= target_final_date:
+            print(f"🔒 Finalizing {p.symbol} on {target_final_date} (Original End: {p.end_date})")
             try:
-                # Use Yahoo for historical check (safe for single requests)
-                hist = yf.download(p.symbol, start=p.end_date, end=p.end_date + timedelta(days=3), progress=False)
+                # Fetch price for that specific adjusted date
+                # We add a small buffer to 'end=' to ensure yfinance captures the day
+                hist = yf.download(p.symbol, start=target_final_date, end=target_final_date + timedelta(days=2), progress=False)
+
                 if not hist.empty:
                     p.final_price = float(hist['Close'].iloc[0])
+                    p.finalized_date = target_final_date  # Save the actual date used
                     current_val = p.final_price
                     session.add(p); session.commit()
                     is_finalized = True
-                else: current_val = p.target_price
-            except: current_val = p.target_price
+                else:
+                    # Data might not be available yet (e.g. Monday morning pre-market)
+                    # Use live price as temporary placeholder or fallback
+                    current_val = p.target_price
+            except Exception as e:
+                print(f"Error finalizing: {e}")
+                current_val = p.target_price
+
         # C. Active
         else:
             current_val = live_prices.get(p.symbol, p.initial_price)
             if current_val == 0.0: current_val = p.initial_price
 
+        # --- STATUS LOGIC ---
         diff = abs(p.target_price - current_val)
         accuracy = max(0, 100 * (1 - (diff / p.target_price))) if p.target_price else 0
 
@@ -233,8 +260,16 @@ async def get_watchlist_performance(session: Session = Depends(get_session)):
             elif accuracy < 80: status = "Off Track ⚠️"
 
         results.append(WatchlistPerformanceItem(
-            id=p.id, symbol=p.symbol, initial_price=p.initial_price, target_price=p.target_price,
-            current_price=current_val, final_price=p.final_price if p.final_price > 0 else None,
-            end_date=p.end_date, created_at=p.created_at, accuracy_score=round(accuracy, 1), status=status
+            id=p.id,
+            symbol=p.symbol,
+            initial_price=p.initial_price,
+            target_price=p.target_price,
+            current_price=current_val,
+            final_price=p.final_price if p.final_price > 0 else None,
+            end_date=p.end_date,
+            finalized_date=p.finalized_date, # Pass the adjusted date to frontend
+            created_at=p.created_at,
+            accuracy_score=round(accuracy, 1),
+            status=status
         ))
     return results

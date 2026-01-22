@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeftIcon, TrophyIcon, LockClosedIcon, ChartBarIcon, XMarkIcon } from "@heroicons/react/24/solid";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { ArrowLeftIcon, TrophyIcon, LockClosedIcon, ChartBarIcon, XMarkIcon, CalendarDaysIcon } from "@heroicons/react/24/solid";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceDot } from 'recharts';
 
 interface PerformanceItem {
     id: number;
@@ -14,6 +14,7 @@ interface PerformanceItem {
     final_price: number | null;
     created_at: string;
     end_date: string;
+    finalized_date?: string; // New Field
     accuracy_score: number;
     status: string;
 }
@@ -36,16 +37,19 @@ export default function AccuracyPage() {
             });
     }, []);
 
-    // Fetch Graph Data when Modal Opens
+    // Fetch Graph Data
     useEffect(() => {
         if (selectedItem) {
             setLoadingGraph(true);
-            // Determine End Date: If finalized, use end_date. If active, use today (to show progress so far)
             const isFinal = selectedItem.final_price !== null;
             const today = new Date().toISOString().split('T')[0];
-            const fetchEnd = isFinal ? selectedItem.end_date : today;
 
-            // Add 1 day to end_date for API inclusivity
+            // If finalized_date exists (weekend adjustment), use that. Otherwise use end_date.
+            const fetchEnd = isFinal
+                ? (selectedItem.finalized_date || selectedItem.end_date)
+                : today;
+
+            // Add 1 day buffer for API
             const endDateObj = new Date(fetchEnd);
             endDateObj.setDate(endDateObj.getDate() + 1);
             const endStr = endDateObj.toISOString().split('T')[0];
@@ -80,7 +84,7 @@ export default function AccuracyPage() {
                             <th className="p-4">Symbol</th>
                             <th className="p-4">Start Price</th>
                             <th className="p-4">Target</th>
-                            <th className="p-4">Result Price (7 Days)</th>
+                            <th className="p-4">Result Price</th>
                             <th className="p-4">End Date</th>
                             <th className="p-4">Accuracy</th>
                             <th className="p-4 text-right">Actions</th>
@@ -89,6 +93,9 @@ export default function AccuracyPage() {
                         <tbody className="divide-y divide-slate-800">
                         {items.map(i => {
                             const isFinal = i.final_price !== null && i.final_price > 0;
+                            // Check if weekend adjustment happened
+                            const isWeekendAdj = i.finalized_date && i.finalized_date !== i.end_date;
+
                             return (
                                 <tr key={i.id} className={`hover:bg-slate-800/30 transition-colors ${isFinal ? 'opacity-70 grayscale-[0.3]' : ''}`}>
                                     <td className="p-4 font-black flex items-center gap-2">
@@ -101,7 +108,14 @@ export default function AccuracyPage() {
                                         ${i.current_price.toFixed(2)}
                                         {isFinal && <span className="ml-2 text-[10px] text-slate-500 uppercase font-bold">(Final)</span>}
                                     </td>
-                                    <td className="p-4 text-xs font-bold text-slate-500">{i.end_date}</td>
+                                    <td className="p-4 text-xs font-bold text-slate-500 flex flex-col">
+                                        <span>{i.end_date}</span>
+                                        {isWeekendAdj && (
+                                            <span className="text-[10px] text-orange-400 flex items-center gap-1 mt-0.5" title={`Closed on weekend. Finalized on ${i.finalized_date}`}>
+                             <CalendarDaysIcon className="h-3 w-3"/> Weekend Adj.
+                           </span>
+                                        )}
+                                    </td>
                                     <td className="p-4">
                                         <div className="flex items-center gap-2">
                                             <div className="w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden">
@@ -111,10 +125,7 @@ export default function AccuracyPage() {
                                         </div>
                                     </td>
                                     <td className="p-4 text-right">
-                                        <button
-                                            onClick={() => setSelectedItem(i)}
-                                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold text-white flex items-center gap-2 ml-auto transition-colors"
-                                        >
+                                        <button onClick={() => setSelectedItem(i)} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold text-white flex items-center gap-2 ml-auto transition-colors">
                                             <ChartBarIcon className="h-3 w-3" /> View Graph
                                         </button>
                                     </td>
@@ -143,6 +154,12 @@ export default function AccuracyPage() {
                                 <p className="text-slate-400 text-sm mt-1">
                                     Prediction Window: <span className="text-white font-mono">{selectedItem.created_at}</span> to <span className="text-white font-mono">{selectedItem.end_date}</span>
                                 </p>
+                                {selectedItem.finalized_date && selectedItem.finalized_date !== selectedItem.end_date && (
+                                    <p className="text-orange-400 text-xs mt-1 font-bold flex items-center gap-1">
+                                        <CalendarDaysIcon className="h-3 w-3"/>
+                                        Market closed on target date. Result taken on next open: {selectedItem.finalized_date}
+                                    </p>
+                                )}
                             </div>
                             <button onClick={() => setSelectedItem(null)} className="p-2 hover:bg-slate-800 rounded-full transition-colors">
                                 <XMarkIcon className="h-6 w-6 text-slate-400 hover:text-white" />
@@ -150,62 +167,48 @@ export default function AccuracyPage() {
                         </div>
 
                         {/* Modal Content (Graph) */}
-                        <div className="p-8 h-[500px] bg-slate-900 flex items-center justify-center">
+                        <div className="p-8 h-[500px] bg-slate-900">
                             {loadingGraph ? (
-                                <div className="text-slate-500 animate-pulse">Loading Chart Data...</div>
-                            ) : graphData.length > 0 && graphData[0].message ? (
-                                // CASE: NEW PREDICTION MESSAGE
-                                <div className="text-center">
-                                    <div className="mb-4 flex justify-center">
-                                        <div className="h-16 w-16 bg-slate-800 rounded-full flex items-center justify-center">
-                                            <ChartBarIcon className="h-8 w-8 text-slate-500" />
-                                        </div>
-                                    </div>
-                                    <h3 className="text-xl font-bold text-white mb-2">Prediction Just Started</h3>
-                                    <p className="text-slate-400 max-w-sm">
-                                        Price history graph will become available as we collect daily closing data over the next 7 days.
-                                    </p>
-                                </div>
-                            ) : graphData.length > 0 ? (
-                                // CASE: SHOW GRAPH
+                                <div className="h-full flex items-center justify-center text-slate-500 animate-pulse">Loading Chart Data...</div>
+                            ) : (
                                 <ResponsiveContainer width="100%" height="100%">
                                     <LineChart data={graphData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                                         <XAxis dataKey="date" stroke="#64748b" tick={{fontSize: 12}} />
                                         <YAxis domain={['auto', 'auto']} stroke="#64748b" tick={{fontSize: 12}} />
-                                        <Tooltip
-                                            contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', color: '#fff' }}
-                                            itemStyle={{ color: '#fff' }}
-                                        />
+                                        <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', color: '#fff' }} itemStyle={{ color: '#fff' }} />
+
+                                        {/* Visual Reference Lines */}
                                         <ReferenceLine y={selectedItem.target_price} label="Target" stroke="red" strokeDasharray="3 3" />
-                                        <ReferenceLine y={selectedItem.initial_price} label="Start" stroke="gray" strokeDasharray="3 3" />
-                                        <Line
-                                            type="monotone"
-                                            dataKey="price"
-                                            stroke="#3b82f6"
-                                            strokeWidth={3}
-                                            dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: '#fff' }}
-                                            activeDot={{ r: 8 }}
-                                        />
+                                        <ReferenceLine x={selectedItem.end_date} stroke="gray" strokeDasharray="3 3" label={{ value: 'Target Date', position: 'insideTopLeft', fill: 'gray', fontSize: 10 }} />
+
+                                        {/* Special Dot for Weekend Adjustment */}
+                                        {selectedItem.finalized_date && selectedItem.finalized_date !== selectedItem.end_date && (
+                                            <ReferenceDot
+                                                x={selectedItem.finalized_date}
+                                                y={selectedItem.final_price || 0}
+                                                r={6}
+                                                fill="#fb923c"
+                                                stroke="white"
+                                                label={{ value: 'Adj. Result', position: 'top', fill: '#fb923c', fontSize: 10, fontWeight: 'bold' }}
+                                            />
+                                        )}
+
+                                        <Line type="monotone" dataKey="price" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 8 }} />
                                     </LineChart>
                                 </ResponsiveContainer>
-                            ) : (
-                                // CASE: ERROR / EMPTY
-                                <div className="text-slate-500">No price history available.</div>
                             )}
                         </div>
 
-                        {/* Modal Footer */}
+                        {/* Footer */}
                         <div className="p-4 bg-slate-950 border-t border-slate-800 flex justify-between text-xs text-slate-500 font-mono">
                             <span>Start: ${selectedItem.initial_price.toFixed(2)}</span>
                             <span>Target: ${selectedItem.target_price.toFixed(2)}</span>
                             <span>Current: ${selectedItem.current_price.toFixed(2)}</span>
                         </div>
-
                     </div>
                 </div>
             )}
-
         </main>
     );
 }

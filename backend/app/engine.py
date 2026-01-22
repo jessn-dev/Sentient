@@ -95,45 +95,27 @@ class PredictionEngine:
         except: return []
 
     def _get_fallback_movers(self):
-        """
-        Fallback logic. Fixes BRK-B symbol for Alpaca.
-        """
         tickers = ['NVDA', 'AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL', 'TSLA', 'AMD', 'BRK-B', 'LLY']
-
-        # 1. TRY ALPACA FIRST
         if self.provider.alpaca:
             print("🔌 [MOVERS] Fetching Fallback Movers from Alpaca...")
             try:
-                # FIX: Convert BRK-B -> BRK.B for Alpaca Request
                 alpaca_tickers = [t.replace('-', '.') for t in tickers]
                 snapshots = self.provider.alpaca.get_snapshots(alpaca_tickers)
-
                 items = []
                 for sym, snap in snapshots.items():
-                    # FIX: Convert BRK.B -> BRK-B for Response
                     clean_sym = sym.replace('.', '-')
-
                     price = float(snap.latest_trade.price)
                     prev_close = float(snap.daily_bar.c) if snap.daily_bar else price
-                    if snap.prev_daily_bar:
-                        prev_close = float(snap.prev_daily_bar.c)
-
+                    if snap.prev_daily_bar: prev_close = float(snap.prev_daily_bar.c)
                     change = ((price - prev_close) / prev_close) * 100 if prev_close else 0
-
                     items.append({"symbol": clean_sym, "price": price, "change_pct": change, "volume": "High"})
-
                 items.sort(key=lambda x: x['change_pct'], reverse=True)
                 to_obj = lambda lst: [MoverItem(symbol=x['symbol'], price=round(x['price'],2), change_pct=round(x['change_pct'],2), volume=x['volume']) for x in lst]
                 return MarketMoversResponse(gainers=to_obj(items[:3]), losers=to_obj(items[-3:]), active=to_obj(items[:5]))
-            except Exception as e:
-                print(f"   ❌ Alpaca Movers Failed: {e}")
+            except: pass
 
-        # 2. YAHOO FALLBACK
         try:
-            print("⚠️ [MOVERS] Using Yahoo Fallback...")
             data = yf.download(tickers, period="2d", progress=False)['Close']
-            if data.empty: return MarketMoversResponse(gainers=[], losers=[], active=[])
-
             items = []
             for t in tickers:
                 try:
@@ -160,14 +142,14 @@ class PredictionEngine:
         df, source = self.provider.fetch_history(request.symbol, days=730)
         current_price = df.iloc[-1]['y']
 
-        # 2. Prophet Prediction
+        # 2. Prophet
         m = Prophet(daily_seasonality=True)
         m.fit(df)
         future = m.make_future_dataframe(periods=request.days)
         forecast = m.predict(future)
         pred_price = forecast.iloc[-1]['yhat']
 
-        # 3. Technicals (Keep existing logic)
+        # 3. Technicals
         combined = pd.concat([df['y'], forecast.iloc[-len(df):]['yhat']], ignore_index=True)
         sma_50 = combined.rolling(50).mean().iloc[-1]
         sma_200 = combined.rolling(200).mean().iloc[-1]
@@ -190,7 +172,7 @@ class PredictionEngine:
             bollinger_signal="Breakout" if current_price>=upper else "Breakdown" if current_price<=lower else "Normal"
         )
 
-        # 4. Sentiment (Keep existing logic)
+        # 4. Sentiment
         sent_news = []
         try:
             yf_news = yf.Ticker(request.symbol).news
@@ -203,21 +185,29 @@ class PredictionEngine:
         score = sum([0.5 if n.sentiment=="Positive" else -0.5 if n.sentiment=="Negative" else 0 for n in sent_news]) / max(1, len(sent_news))
         sentiment = SentimentAnalysis(score=round(score,2), label="Bullish" if score>0.1 else "Bearish" if score<-0.1 else "Neutral", news=sent_news)
 
-        # 5. Liquidity & Company Info (UPDATED)
+        # 5. Liquidity & Company Name (UPDATED)
         vol, cap, spread = 0, 0, 0
-        company_name = request.symbol # Default fallback
+        company_name = request.symbol # Default
 
-        try:
-            ticker = yf.Ticker(request.symbol)
-            i = ticker.info
+        # --- STRATEGY: TRY ALPACA NAME FIRST ---
+        if self.provider.alpaca:
+            try:
+                # Alpaca asset endpoint is instant and not rate-limited
+                asset = self.provider.alpaca.get_asset(request.symbol.replace('-', '.'))
+                company_name = asset.name
+            except Exception as e:
+                print(f"Alpaca Name Fetch Error: {e}")
 
-            # --- GET FULL NAME ---
-            company_name = i.get('longName') or i.get('shortName') or request.symbol
-
-            vol, cap = i.get('averageVolume10days',0), i.get('marketCap',0)
-            bid, ask = i.get('bid',0), i.get('ask',0)
-            if ask and bid: spread = round(((ask-bid)/ask)*100, 4)
-        except: pass
+        # --- FALLBACK: TRY YAHOO IF ALPACA FAILED ---
+        if company_name == request.symbol:
+            try:
+                # We skip .info if we know Yahoo is blocking us, but try one last time
+                i = yf.Ticker(request.symbol).info
+                company_name = i.get('longName') or i.get('shortName') or request.symbol
+                vol, cap = i.get('averageVolume10days',0), i.get('marketCap',0)
+                bid, ask = i.get('bid',0), i.get('ask',0)
+                if ask and bid: spread = round(((ask-bid)/ask)*100, 4)
+            except: pass
 
         if vol == 0: cap, vol = self._scrape_finviz_liquidity(request.symbol)
 
@@ -232,7 +222,7 @@ class PredictionEngine:
 
         return PredictionResponse(
             symbol=request.symbol.upper(),
-            company_name=company_name,  # <--- PASS TO RESPONSE
+            company_name=company_name,
             tv_symbol=self._get_tv_symbol(request.symbol),
             current_price=current_price,
             predicted_price=pred_price,
