@@ -1,28 +1,33 @@
+from typing import Optional
 from sqlmodel import SQLModel, Field
 from datetime import datetime, timezone
-from typing import Optional
 
-# --- DATABASE TABLE ---
+# --- DATABASE MODELS ---
+
 class Prediction(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: str = Field(index=True)
-    symbol: str
+    symbol: str = Field(index=True)
 
-    # AI Data to Save
-    start_price: float           # Price at the moment of saving
-    predicted_price: float       # The AI's 7-day target
-    confidence_score: float      # The AI's confidence
+    # Prices
+    start_price: float
+    predicted_price: float
+    final_price: Optional[float] = None
+
+    # Scores
+    confidence_score: float
+    accuracy_score: Optional[float] = None
+
+    # Status & Meta
+    status: str = Field(default="ACTIVE") # ACTIVE, VALIDATED
+    explanation: Optional[str] = None
 
     # Dates
-    start_date: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    target_date: datetime        # When we validate this (7 days later)
+    # ⚠️ FIX: This was likely missing or named differently
+    saved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    target_date: datetime
 
-    # Status
-    status: str = Field(default="ACTIVE") # ACTIVE, VALIDATED
-    final_price: Optional[float] = None   # Filled after 7 days
-    accuracy_score: Optional[float] = None # How close was it?
-
-# --- API SCHEMAS ---
+# --- Pydantic Schemas (Request/Response Bodies) ---
 
 class SavePredictionRequest(SQLModel):
     user_id: str
@@ -30,14 +35,8 @@ class SavePredictionRequest(SQLModel):
     current_price: float
     predicted_price: float
     confidence_score: float
-    target_date: datetime # Passed from the AI response
-    overwrite: bool = False # Flag to force replacement
-
-class QuoteResponse(SQLModel):
-    symbol: str
-    price: float
-    change_percent: float
-    is_market_open: bool
+    target_date: datetime
+    overwrite: bool = False
 
 class NewsItem(SQLModel):
     title: str
@@ -47,3 +46,9 @@ class NewsItem(SQLModel):
     published: int
     related_ticker: str
     change_percent: float
+
+class QuoteResponse(SQLModel):
+    symbol: str
+    price: float
+    change_percent: float
+    is_market_open: bool

@@ -39,13 +39,13 @@ export default function ForecastPage({ params }: { params: Promise<{ symbol: str
                 <div className="bg-[#1e293b] border border-slate-700 p-6 rounded-xl shadow-lg">
                     <div className="flex items-center justify-between mb-2">
                         <span className="text-slate-400 font-medium text-sm">7-Day Price Target</span>
-                        <TrendingUp className={`h-5 w-5 ${data.predicted_price_7d > data.current_price ? 'text-green-400' : 'text-red-400'}`} />
+                        <TrendingUp className={`h-5 w-5 ${data.predicted_price > data.current_price ? 'text-green-400' : 'text-red-400'}`} />
                     </div>
                     <div className="text-3xl font-bold text-slate-100">
-                        ${data.predicted_price_7d.toFixed(2)}
+                        ${data.predicted_price.toFixed(2)}
                     </div>
-                    <div className={`text-sm mt-1 ${data.predicted_price_7d > data.current_price ? 'text-green-400' : 'text-red-400'}`}>
-                        {((data.predicted_price_7d - data.current_price) / data.current_price * 100).toFixed(2)}% implied move
+                    <div className={`text-sm mt-1 ${data.predicted_price > data.current_price ? 'text-green-400' : 'text-red-400'}`}>
+                        {((data.predicted_price - data.current_price) / data.current_price * 100).toFixed(2)}% implied move
                     </div>
                 </div>
 
@@ -78,7 +78,7 @@ export default function ForecastPage({ params }: { params: Promise<{ symbol: str
                     <SaveForecastWidget
                         symbol={symbol}
                         currentPrice={data.current_price}
-                        predictedPrice={data.predicted_price_7d}
+                        predictedPrice={data.predicted_price}
                         confidence={data.confidence_score}
                         targetDate={targetDate.toISOString()}
                     />

@@ -26,7 +26,7 @@ def test_predict_endpoint(MockEngine, MockProvider, MockRedis, client): # <--- A
     mock_engine_instance = MockEngine.return_value
     mock_engine_instance.predict.return_value = MagicMock(
         symbol="AAPL",
-        predicted_price_7d=150.0,
+        predicted_price=150.0,
         confidence_score=0.85,
         explanation="Bullish trend.",
         forecast_date=datetime.now(timezone.utc).date(),
@@ -40,7 +40,7 @@ def test_predict_endpoint(MockEngine, MockProvider, MockRedis, client): # <--- A
     assert response.status_code == 200
     data = response.json()
     assert data["symbol"] == "AAPL"
-    assert data["predicted_price_7d"] == 150.0
+    assert data["predicted_price"] == 150.0
 
 # --- TEST 3: SAVE PREDICTION & CONFLICT LOGIC ---
 def test_save_prediction_flow(client, session):

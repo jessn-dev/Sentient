@@ -1,77 +1,81 @@
-from enum import Enum
-from datetime import date, datetime
-from typing import Annotated, List, Optional
-from pydantic import (
-    BaseModel, Field, ConfigDict, StrictFloat, StrictInt,
-    field_validator, computed_field
-)
+from pydantic import BaseModel
+from datetime import date
+from typing import Optional, List
 
-# --- Enums & Types ---
-class StockExchange(str, Enum):
-    NASDAQ = "NASDAQ"
-    NYSE = "NYSE"
-    SSE = "SSE"
-
-# Reusable Validator: Upper case string, 1-5 chars
-TickerSymbol = Annotated[str, Field(min_length=1, max_length=10, pattern=r"^[A-Z]+$")]
-
-# --- Input Models ---
+# Request Model
 class StockRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
-
-    # 1. Ensure max_length covers your test cases (e.g. 5 for AAPL, 6 for GOOGLE?)
-    # If testing with "GOOGLE", change max_length to 6 or 10.
-    symbol: Annotated[str, Field(min_length=1, max_length=10, pattern=r"^[A-Z]+$")]
+    symbol: str
     days: int = 7
 
-    # 2. Ensure 'query_date' is REMOVED or Optional
-    # query_date: date  <-- DELETE THIS LINE
+# Sub-Models for Analysis
+class TechnicalSignals(BaseModel):
+    sma_50: float
+    sma_200: float
+    rsi: float
+    bollinger_upper: float
+    bollinger_lower: float
+    rsi_signal: str       # "Overbought", "Oversold", "Neutral"
+    trend_signal: str     # "Strong Uptrend", "Death Cross", etc.
+    bollinger_signal: str # "High Volatility", "Normal"
 
-    exchange: StockExchange = StockExchange.NASDAQ
+class NewsItem(BaseModel):
+    title: str
+    link: str
+    published: str
+    sentiment: str        # "Positive", "Negative", "Neutral"
 
-# --- Internal Data Structures ---
-class MarketRecord(BaseModel):
-    model_config = ConfigDict(frozen=True, strict=True)
+class SentimentAnalysis(BaseModel):
+    score: float
+    label: str            # "Bullish", "Bearish", "Neutral"
+    news: List[NewsItem]
 
-    timestamp: datetime
-    open: StrictFloat
-    high: StrictFloat
-    low: StrictFloat
-    close: StrictFloat
-    volume: StrictInt
+class LiquidityData(BaseModel):
+    avg_volume: float
+    market_cap: float
+    bid_ask_spread: Optional[float]
+    liquidity_rating: str # "High (Institutional)", "Low (Illiquid)"
+    slippage_risk: str    # "Low", "High"
 
-# --- Output Models ---
+class MoverItem(BaseModel):
+    symbol: str
+    price: float
+    change_pct: float
+    volume: str
+
+class MarketMoversResponse(BaseModel):
+    gainers: List[MoverItem]
+    losers: List[MoverItem]
+    active: List[MoverItem]
+
+# Main Response
 class PredictionResponse(BaseModel):
     symbol: str
+    company_name: str
+    tv_symbol: str        # e.g., "NYSE:F"
     current_price: float
-    predicted_price_7d: float
-    confidence_score: float
+    predicted_price: float
     forecast_date: date
+    confidence_score: float
+    explanation: str
+    technicals: Optional[TechnicalSignals] = None
+    sentiment: Optional[SentimentAnalysis] = None
+    liquidity: Optional[LiquidityData] = None
 
-    # "Overview" Data (Optional because some might be missing for certain stocks)
-    market_cap: float | None = None
-    pe_ratio: float | None = None
-    dividend_yield: float | None = None
-    fifty_two_week_high: float | None = None
-    fifty_two_week_low: float | None = None
-    volume: int | None = None
-    open_price: float | None = None
-    high_price: float | None = None
-    low_price: float | None = None
-    explanation: str | None = None
+# --- Watchlist & Performance Models ---
+class WatchlistAddRequest(BaseModel):
+    symbol: str
+    initial_price: float
+    target_price: float
+    end_date: date
 
-    @computed_field
-    @property
-    def price_movement(self) -> str:
-        if self.predicted_price_7d > self.current_price:
-            return "BULLISH"
-        elif self.predicted_price_7d < self.current_price:
-            return "BEARISH"
-        return "NEUTRAL"
-
-    @computed_field
-    @property
-    def growth_percentage(self) -> float:
-        if self.current_price == 0: return 0.0
-        delta = self.predicted_price_7d - self.current_price
-        return round((delta / self.current_price) * 100, 2)
+class WatchlistPerformanceItem(BaseModel):
+    id: int
+    symbol: str
+    initial_price: float
+    target_price: float
+    current_price: float
+    final_price: Optional[float] = None
+    end_date: date
+    created_at: date
+    accuracy_score: float
+    status: str

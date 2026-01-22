@@ -1,74 +1,43 @@
-// src/components/MarketStatus.tsx
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { Clock } from 'lucide-react';
+import { useEffect, useState } from "react";
 
 export default function MarketStatus() {
-    const [status, setStatus] = useState({ isOpen: false, text: 'Loading...' });
+    const [isOpen, setIsOpen] = useState(false);
+    const [mounted, setMounted] = useState(false);
+    const [currentTime, setCurrentTime] = useState("");
 
     useEffect(() => {
-        const updateStatus = () => {
+        setMounted(true);
+        const checkMarketStatus = () => {
             const now = new Date();
-            // Force US Eastern Time
-            const nyTime = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}));
-
-            const day = nyTime.getDay(); // 0=Sun, 6=Sat
-            const hour = nyTime.getHours();
-            const minute = nyTime.getMinutes();
-            const totalMinutes = hour * 60 + minute;
-
-            const MARKET_OPEN = 570;  // 9:30 AM
-            const MARKET_CLOSE = 960; // 4:00 PM
-
-            const isWeekday = day >= 1 && day <= 5;
-            const isOpen = isWeekday && totalMinutes >= MARKET_OPEN && totalMinutes < MARKET_CLOSE;
-
-            let text = '';
-
-            if (isOpen) {
-                // Calculate time to close
-                const minsToClose = MARKET_CLOSE - totalMinutes;
-                const h = Math.floor(minsToClose / 60);
-                const m = minsToClose % 60;
-                text = `U.S. Markets Open (Closes in ${h}h ${m}m)`;
-            } else {
-                // Calculate time to open
-                let minsToOpen = 0;
-
-                if (isWeekday && totalMinutes < MARKET_OPEN) {
-                    // Same day pre-market
-                    minsToOpen = MARKET_OPEN - totalMinutes;
-                    const h = Math.floor(minsToOpen / 60);
-                    const m = minsToOpen % 60;
-                    text = `U.S. Markets Closed (Opens in ${h}h ${m}m)`;
-                } else {
-                    // After hours or weekend
-                    text = 'U.S. Markets Closed';
-                }
-            }
-
-            setStatus({ isOpen, text });
+            setCurrentTime(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }));
+            const day = now.getUTCDay();
+            const hour = now.getUTCHours();
+            const minute = now.getUTCMinutes();
+            const timeInUTC = hour + minute / 60;
+            // US Markets: Mon-Fri, 14:30 - 21:00 UTC
+            setIsOpen(day >= 1 && day <= 5 && timeInUTC >= 14.5 && timeInUTC <= 21);
         };
-
-        updateStatus();
-        const timer = setInterval(updateStatus, 60000);
-        return () => clearInterval(timer);
+        checkMarketStatus();
+        const interval = setInterval(checkMarketStatus, 60000);
+        return () => clearInterval(interval);
     }, []);
 
+    if (!mounted) return <div className="h-[50px] w-full bg-slate-900 rounded-none border-b border-slate-800 animate-pulse" />;
+
     return (
-        <div className={`
-      inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-sm font-medium border shadow-sm
-      ${status.isOpen
-            ? 'bg-green-50 text-green-700 border-green-200'
-            : 'bg-gray-50 text-gray-600 border-gray-200'}
-    `}>
-            <div className="relative flex h-2.5 w-2.5">
-                {status.isOpen && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>}
-                <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${status.isOpen ? 'bg-green-500' : 'bg-gray-400'}`}></span>
+        // FIX: Removed 'rounded-xl', 'mb-4', and added 'border-b' to make it look like a header
+        <div className="flex items-center justify-between px-4 py-3 bg-slate-900 border-b border-slate-800">
+            <div className="flex items-center gap-2">
+                <div className={`h-2 w-2 rounded-full ${isOpen ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">
+          US Market {isOpen ? 'Open' : 'Closed'}
+        </span>
             </div>
-            <Clock className="h-3.5 w-3.5" />
-            <span>{status.text}</span>
+            <span className="text-[10px] font-mono font-bold text-gray-500">
+        {currentTime}
+      </span>
         </div>
     );
 }

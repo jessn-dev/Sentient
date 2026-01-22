@@ -1,127 +1,65 @@
-'use client';
+"use client";
+import { useState, useEffect } from "react";
+import PredictionResult from "@/components/PredictionResult";
+import DashboardGrid from "@/components/DashboardGrid";
+import MarketStatus from "@/components/MarketStatus";
+import TradingViewWidget from "@/components/TradingViewWidget";
+import MarketMovers from "@/components/MarketMovers";
+import SP500Reference from "@/components/SP500Reference";
+import { MagnifyingGlassIcon, ExclamationCircleIcon } from "@heroicons/react/24/outline";
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import TrendingCard from '@/components/TrendingCard';
-import MarketStatus from '@/components/MarketStatus';
-import { timeAgo } from '@/lib/utils';
-import { Activity, TrendingUp, TrendingDown } from 'lucide-react';
+export default function Home() {
+  const [symbol, setSymbol] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
 
-interface NewsItem {
-  title: string;
-  publisher: string;
-  link: string;
-  published: number;
-  thumbnail?: string;
-  related_ticker: string;
-  change_percent: number;
-}
-
-// Helper to fetch batch trending data
-async function getBatchQuotes(symbols: string[]) {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/quotes?symbols=${symbols.join(',')}`);
-  return res.json();
-}
-
-export default function HomePage() {
-  const [news, setNews] = useState<NewsItem[]>([]);
-  const [trendingData, setTrendingData] = useState<any>({});
-  const router = useRouter();
-
-  useEffect(() => {
-    // 1. Fetch News
-    fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/news/MARKET`)
-        .then(res => res.json())
-        .then(setNews)
-        .catch(console.error);
-
-    // 2. Fetch Trending Data
-    const HOT_TICKERS = ['NVDA', 'TSLA', 'AAPL', 'AMD', 'MSFT', 'AMZN'];
-    getBatchQuotes(HOT_TICKERS).then(setTrendingData).catch(console.error);
-  }, []);
-
-  const handleSearch = (symbol: string) => {
-    router.push(`/stock/${symbol}`);
+  const fetchPrediction = async (ticker: string) => {
+    setLoading(true); setError("");
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/predict`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol: ticker, days: 7 }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "Failed");
+      setData(await res.json());
+    } catch(e: any) { setError(e.message); }
+    finally { setLoading(false); }
   };
 
+  useEffect(() => { fetchPrediction("NVDA"); }, []);
+  const handlePredict = (e: any) => { e.preventDefault(); if(symbol) fetchPrediction(symbol); };
+
   return (
-      <div className="max-w-7xl mx-auto px-4 py-8 space-y-12">
+      <main className="fixed inset-0 z-[100] bg-[#020617] text-white flex flex-col">
+        <div className="w-full h-12 border-b border-slate-800 bg-slate-900 shrink-0"><TradingViewWidget type="ticker-tape" /></div>
+        <div className="flex flex-1 overflow-hidden">
+          <aside className="hidden md:block w-72 lg:w-96 shrink-0 border-r border-slate-800 bg-slate-900/50"><TradingViewWidget type="timeline" /></aside>
 
-        {/* 1. HERO SECTION (Cleaned Up) */}
-        <div className="text-center space-y-4 pt-4">
-          <MarketStatus />
-          <h1 className="text-4xl md:text-5xl font-extrabold text-slate-100 tracking-tight">
-            Market<span className="text-blue-500">Mind</span> AI
-          </h1>
-          <p className="text-slate-400 max-w-xl mx-auto text-lg">
-            Stay ahead with AI-powered forecasts, real-time market data, and breaking news analysis.
-          </p>
-          {/* Search Bar Removed (Using Navbar) */}
-        </div>
-
-        {/* 2. TRENDING SECTION */}
-        <div className="animate-in fade-in slide-in-from-bottom-8 duration-700 delay-100 w-full">
-          <div className="flex items-center justify-between mb-4 px-1">
-            <h3 className="font-bold text-xl text-slate-200 flex items-center gap-2">
-              <Activity className="h-5 w-5 text-blue-500" />
-              Trending Now
-            </h3>
+          <div className="flex-1 flex flex-col gap-8 p-6 lg:p-10 overflow-y-auto custom-scrollbar">
+            <div className="w-full max-w-2xl mx-auto text-center mt-4">
+              <h1 className="text-5xl font-black mb-2 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-500">SentientAI</h1>
+              <p className="text-slate-400 text-sm">Neural Forecasting for S&P 500</p>
+              <form onSubmit={handlePredict} className="relative mt-8 shadow-2xl">
+                <input type="text" value={symbol} onChange={(e)=>setSymbol(e.target.value.toUpperCase())} placeholder="Search Ticker..." className="w-full bg-slate-800/80 border border-slate-700 py-4 pl-12 pr-32 rounded-2xl outline-none focus:ring-2 focus:ring-blue-600 text-lg" />
+                <MagnifyingGlassIcon className="h-6 w-6 absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+                <button type="submit" disabled={loading} className="absolute right-2 top-2 bottom-2 bg-blue-600 px-6 rounded-xl font-bold text-xs uppercase">{loading ? "..." : "Predict"}</button>
+              </form>
+              {error && <div className="mt-4 p-4 bg-red-900/20 border border-red-900/50 rounded-xl text-red-400 font-bold flex gap-2 justify-center"><ExclamationCircleIcon className="h-5 w-5"/>{error}</div>}
+            </div>
+            <div className="w-full pb-20 space-y-10">
+              {loading ? <div className="h-[300px] bg-slate-900/50 rounded-xl animate-pulse border border-slate-800"/> : data && <PredictionResult data={data} onSaveSuccess={()=>setRefresh(r=>r+1)} />}
+              <DashboardGrid refreshTrigger={refresh} />
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            {['NVDA', 'TSLA', 'AAPL', 'AMD', 'MSFT', 'AMZN'].map((sym) => (
-                <div key={sym} onClick={() => handleSearch(sym)} className="cursor-pointer">
-                  <TrendingCard symbol={sym} data={trendingData[sym]} />
-                </div>
-            ))}
-          </div>
+          <aside className="w-full lg:w-80 shrink-0 border-l border-slate-800 bg-slate-900/30 flex flex-col">
+            <MarketStatus />
+            <MarketMovers />
+            <div className="flex-1 overflow-hidden"><SP500Reference /></div>
+          </aside>
         </div>
-
-        {/* 3. NEWS SECTION */}
-        <div className="space-y-6">
-          <h2 className="text-xl font-bold text-slate-200 border-l-4 border-blue-500 pl-3">
-            Latest Market News
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {news.map((item, i) => (
-                <a
-                    key={i}
-                    href={item.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group block bg-[#1e293b] border border-slate-700 rounded-xl overflow-hidden hover:border-blue-500/50 transition-all duration-300 flex flex-col h-full hover:shadow-lg hover:shadow-blue-900/10"
-                >
-                  {/* Top Bar: Live Ticker Impact */}
-                  <div className="px-5 py-3 border-b border-slate-700 bg-slate-800/50 flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                   <span className="text-xs font-bold text-slate-300 bg-slate-700 px-2 py-0.5 rounded">
-                     {item.related_ticker}
-                   </span>
-                      <span className={`text-xs font-mono font-medium ${item.change_percent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                     {item.change_percent > 0 ? '+' : ''}{item.change_percent}%
-                   </span>
-                    </div>
-                    <span className="text-xs text-slate-500 font-medium">
-                  {timeAgo(item.published)}
-                </span>
-                  </div>
-
-                  <div className="p-5 flex flex-col flex-1">
-                    <h3 className="font-bold text-slate-100 leading-snug mb-3 group-hover:text-blue-400 transition-colors line-clamp-3">
-                      {item.title}
-                    </h3>
-
-                    <div className="mt-auto pt-2 flex items-center gap-2">
-                      <div className="h-1.5 w-1.5 rounded-full bg-blue-500"></div>
-                      <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                     {item.publisher}
-                   </span>
-                    </div>
-                  </div>
-                </a>
-            ))}
-          </div>
-        </div>
-      </div>
+      </main>
   );
 }

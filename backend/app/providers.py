@@ -1,131 +1,71 @@
-import yfinance as yf
+import os
 import pandas as pd
-import logging
+import yfinance as yf
+import alpaca_trade_api as tradeapi
 from datetime import datetime, timedelta
-from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest
-from alpaca.data.timeframe import TimeFrame
-from alpaca.data.enums import DataFeed
-from .config import settings
-
-# Initialize Logger
-logger = logging.getLogger("uvicorn")
 
 class DataProvider:
-    def __init__(self):
-        self.api_key = settings.ALPACA_API_KEY
-        self.secret_key = settings.ALPACA_SECRET_KEY
-        self.client = StockHistoricalDataClient(self.api_key, self.secret_key)
+    def __init__(self, alpaca_client=None):
+        self.alpaca = alpaca_client
 
-    def fetch_data(self, symbol: str, days: int = 365 * 2):
-        """
-        Waterfall Strategy:
-        1. Try Alpaca SIP (Best Data, requires paid sub).
-        2. If 403/Forbidden, Try Alpaca IEX (Good Data, Free).
-        3. If all Alpaca fails, Fallback to Yahoo Finance (Slower, rate limits).
-        """
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=days)
+        if self.alpaca:
+            print("✅ [PROVIDER] Alpaca Client Received")
+        else:
+            print("⚠️ [PROVIDER] No Alpaca Client Provided. History will rely on Yahoo.")
 
-        # --- ATTEMPT 1 & 2: ALPACA (SIP -> IEX) ---
-        try:
-            # Step 1: Default to SIP (Best for paid users)
-            # Note: We use a nested try/except to handle the specific "Forbidden" error
+    def fetch_history(self, symbol: str, days: int = 730):
+        """
+        Fetches historical data for Prophet.
+        Strategy: Alpaca (IEX Feed) -> Yahoo Fallback
+        """
+        symbol = symbol.upper()
+        # Alpaca Format: BRK.B, Yahoo Format: BRK-B
+        alpaca_symbol = symbol.replace('-', '.')
+
+        # --- ATTEMPT 1: ALPACA (IEX FEED) ---
+        if self.alpaca:
+            print(f"🔌 [HISTORY] Connecting to Alpaca (IEX Feed) for {alpaca_symbol}...")
             try:
-                request_params = StockBarsRequest(
-                    symbol_or_symbols=symbol,
-                    timeframe=TimeFrame.Day,
-                    start=start_date,
-                    limit=1000,
-                    feed=DataFeed.SIP # Explicitly request SIP first
-                )
-                bars = self.client.get_stock_bars(request_params)
+                end_dt = datetime.now()
+                start_dt = end_dt - timedelta(days=days)
 
+                bars = self.alpaca.get_bars(
+                    alpaca_symbol,
+                    "1Day",
+                    start=start_dt.strftime('%Y-%m-%d'),
+                    end=end_dt.strftime('%Y-%m-%d'),
+                    adjustment='raw',
+                    feed='iex'
+                ).df
+
+                if not bars.empty:
+                    print(f"   ✅ [HISTORY] Alpaca returned {len(bars)} rows")
+                    bars = bars.reset_index()
+                    df = pd.DataFrame({
+                        'ds': bars['timestamp'].dt.tz_localize(None),
+                        'y': bars['close']
+                    })
+                    return df, "Alpaca (IEX)"
             except Exception as e:
-                # Check if it's a subscription error
-                if "subscription does not permit" in str(e) or "Forbidden" in str(e):
-                    logger.warning(f"⚠️ Alpaca SIP feed forbidden for {symbol}. Falling back to IEX.")
+                print(f"   ❌ [HISTORY] Alpaca Failed: {e}")
 
-                    # Step 2: Fallback to IEX (Free Tier)
-                    request_params = StockBarsRequest(
-                        symbol_or_symbols=symbol,
-                        timeframe=TimeFrame.Day,
-                        start=start_date,
-                        limit=1000,
-                        feed=DataFeed.IEX # Fallback to IEX
-                    )
-                    bars = self.client.get_stock_bars(request_params)
-                else:
-                    raise e # Re-raise if it's a different error (like network down)
-
-            # Process Alpaca Data
-            if not bars.data:
-                raise ValueError("Alpaca returned empty data.")
-
-            df = bars.df.loc[symbol]
-            df = df.reset_index()
-
-            # Rename columns to match our engine's expectations
-            df = df.rename(columns={
-                "timestamp": "Date",
-                "open": "Open",
-                "high": "High",
-                "low": "Low",
-                "close": "Close",
-                "volume": "Volume"
-            })
-
-            # Ensure Date is timezone-naive for Prophet
-            if df['Date'].dt.tz is not None:
-                df['Date'] = df['Date'].dt.tz_localize(None)
-
-            # Fetch basic info (Sector/Industry) - Yahoo is best for this metadata even if we use Alpaca for price
-            info = self.fetch_info_yahoo(symbol)
-
-            return {"history": df, "info": info}
-
-        except Exception as e:
-            logger.error(f"❌ Alpaca Failed ({str(e)}), falling back to Yahoo...")
-            return self.fetch_with_yahoo(symbol, start_date, end_date)
-
-    def fetch_with_yahoo(self, symbol: str, start_date, end_date):
-        """Last Resort: Yahoo Finance"""
+        # --- ATTEMPT 2: YAHOO FINANCE (BACKUP) ---
         try:
-            ticker = yf.Ticker(symbol)
+            print(f"⚠️ [HISTORY] Using Yahoo Fallback for {symbol}...")
+            df = yf.download(symbol, period="2y", progress=False)
 
-            # Fetch History
-            df = ticker.history(start=start_date, end=end_date)
             if df.empty:
-                raise ValueError("Yahoo Finance returned no data.")
+                raise ValueError("Yahoo returned empty data.")
 
             df = df.reset_index()
+            if isinstance(df.columns, pd.MultiIndex):
+                try: df.columns = df.columns.get_level_values(0)
+                except: pass
 
-            # Ensure Date is timezone-naive
-            if 'Date' in df.columns and df['Date'].dt.tz is not None:
-                df['Date'] = df['Date'].dt.tz_localize(None)
-
-            # Fetch Info
-            info = {
-                "sector": ticker.info.get("sector", "Unknown"),
-                "industry": ticker.info.get("industry", "Unknown")
-            }
-
-            return {"history": df, "info": info}
-
+            clean_df = pd.DataFrame({
+                'ds': pd.to_datetime(df['Date']).dt.tz_localize(None),
+                'y': df['Close']
+            })
+            return clean_df, "Yahoo"
         except Exception as e:
-            logger.error(f"❌ All Data Sources Failed: {e}")
-            raise RuntimeError(f"Could not fetch data for {symbol} from any source.")
-
-    def fetch_info_yahoo(self, symbol: str):
-        """Helper to get just metadata from Yahoo"""
-        try:
-            t = yf.Ticker(symbol)
-            return {
-                "sector": t.info.get("sector", "Unknown"),
-                "industry": t.info.get("industry", "Unknown")
-            }
-        except:
-            return {"sector": "Unknown", "industry": "Unknown"}
-
-
-        redis-cli --tls -u 
+            raise ValueError(f"All data providers failed for {symbol}: {e}")

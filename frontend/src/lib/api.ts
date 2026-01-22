@@ -3,7 +3,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 export interface PredictionResponse {
     symbol: string;
     current_price: number;
-    predicted_price_7d: number;
+    predicted_price: number;
     confidence_score: number;
     forecast_date: string;
     price_movement: 'BULLISH' | 'BEARISH' | 'NEUTRAL';

@@ -1,523 +1,240 @@
-import redis
-import logging
-import feedparser
-import ssl
-from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Optional
-from urllib.parse import quote
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from sqlmodel import Session, select
+from typing import List, Dict
+import time
+from datetime import datetime, timedelta, date
+import yfinance as yf
+import os
+
+from .database import create_db_and_tables, Prediction, get_session
+from .engine import PredictionEngine
+from .schemas import StockRequest, PredictionResponse, MarketMoversResponse, WatchlistAddRequest, WatchlistPerformanceItem
 from contextlib import asynccontextmanager
 
-# FastAPI & SQLModel
-from fastapi import FastAPI, HTTPException, Query, Depends, Request
-from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import Session, select, delete
-from qstash import Receiver
+# --- CACHE SETUP ---
+PRICE_CACHE: Dict[str, Dict] = {}
+CACHE_TTL = 300  # 5 Minutes
 
-# Internal Modules
-from .config import settings
-from .schemas import StockRequest, PredictionResponse
-from .providers import DataProvider
-from .engine import PredictionEngine
-from .database import create_db_and_tables, get_session
-from .models import Prediction, SavePredictionRequest, NewsItem, QuoteResponse
+# --- ALPACA SETUP ---
+import alpaca_trade_api as tradeapi
+ALPACA_KEY = os.environ.get("ALPACA_KEY")
+ALPACA_SECRET = os.environ.get("ALPACA_SECRET")
+ALPACA_URL = "https://paper-api.alpaca.markets"
 
-# Initialize Logger
-logger = logging.getLogger("uvicorn")
+alpaca = None
+if ALPACA_KEY and ALPACA_SECRET:
+    try:
+        alpaca = tradeapi.REST(ALPACA_KEY, ALPACA_SECRET, ALPACA_URL, api_version='v2')
+        print("✅ [INIT] Alpaca API Connected in Main")
+    except Exception as e:
+        print(f"⚠️ [INIT] Alpaca Init Failed: {e}")
+else:
+    print("⚠️ [INIT] Missing Alpaca Keys in Environment")
 
-# --- LIFESPAN MANAGER (Replaces on_event) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Startup Logic
-    print("\n" + "="*60)
-    print(f"🚀  STARTING {settings.APP_NAME}")
-    print(f"🌍  ENVIRONMENT:  {settings.ENVIRONMENT}")
-
-    db_type = "POSTGRESQL (Production)" if "postgresql" in settings.DATABASE_URL else "SQLITE (Local)"
-    print(f"💾  DATABASE:     {db_type}")
-
-    # Check Redis Connection
-    redis_status = "DISABLED (Not Configured)"
-    if settings.REDIS_URL:
-        try:
-            test_redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
-            if test_redis.ping():
-                redis_status = f"CONNECTED ({settings.REDIS_URL})"
-        except Exception as e:
-            redis_status = f"ERROR: {e}"
-
-    print(f"⚡  REDIS:        {redis_status}")
-    print("="*60 + "\n")
-
     create_db_and_tables()
+    yield
 
-    yield # Application runs here
+app = FastAPI(lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-    # 2. Shutdown Logic (Clean up resources if needed)
-    pass
+# --- BULK PRICE FETCHER ---
+def get_live_prices(symbols: List[str]) -> Dict[str, float]:
+    current_time = time.time()
+    prices = {}
+    missing = []
 
-# --- FASTAPI SETUP ---
-app = FastAPI(
-    title=settings.APP_NAME,
-    version="1.6.0",
-    lifespan=lifespan # New method
-)
-
-# CORS Setup
-origins = [
-    "http://localhost:3000",                  # Local Dev
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins, # Use specific list in Prod
-    # ALLOW REGEX (Optional but helpful for Vercel Previews):
-    # This allows ANY app on vercel.app to talk to your backend
-    allow_origin_regex="https://.*\.vercel\.app",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Redis Cache Client (Global)
-try:
-    cache = redis.from_url(settings.REDIS_URL, decode_responses=True)
-except Exception:
-    cache = None
-
-
-# --- HELPERS ---
-
-def derive_ticker(text: str, default: str) -> str:
-    """Scans text for keywords to assign a relevant ticker."""
-    text = text.upper()
-    mappings = {
-        "GOLD": "GLD", "SILVER": "SLV", "OIL": "USO",
-        "BITCOIN": "BTC-USD", "CRYPTO": "BTC-USD", "ETHEREUM": "ETH-USD",
-        "NVIDIA": "NVDA", "TESLA": "TSLA", "APPLE": "AAPL",
-        "MICROSOFT": "MSFT", "AMAZON": "AMZN", "GOOGLE": "GOOGL",
-        "META": "META", "NETFLIX": "NFLX", "AMD": "AMD",
-        "INTEL": "INTC", "FED": "SPY", "POWELL": "SPY",
-        "INFLATION": "SPY", "JOBS": "SPY"
-    }
-    for keyword, ticker in mappings.items():
-        if keyword in text:
-            return ticker
-    return default
-
-
-# --- PUBLIC DATA ROUTES ---
-
-@app.get("/health")
-async def health_check():
-    return {"status": "ok", "version": "1.6.0"}
-
-
-@app.get("/quotes", response_model=Dict[str, QuoteResponse])
-async def get_batch_quotes(symbols: str = Query(..., description="Comma-separated symbols")):
-    """Fetches live snapshots for multiple symbols efficiently."""
-    symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
-    if not symbol_list: return {}
-
-    try:
-        provider = DataProvider()
-        from alpaca.data.requests import StockSnapshotRequest
-
-        req = StockSnapshotRequest(symbol_or_symbols=symbol_list)
-        snapshots = provider.client.get_stock_snapshot(req)
-
-        results = {}
-        for sym, snap in snapshots.items():
-            # Robust Price Logic (Live -> Today -> Prev)
-            price = 0.0
-            if snap.latest_trade and snap.latest_trade.price > 0:
-                price = snap.latest_trade.price
-            elif snap.daily_bar and snap.daily_bar.close > 0:
-                price = snap.daily_bar.close
-            elif snap.previous_daily_bar and snap.previous_daily_bar.close > 0:
-                price = snap.previous_daily_bar.close
-
-            prev_close = snap.previous_daily_bar.close if snap.previous_daily_bar else 0.0
-            change = 0.0
-            if prev_close > 0 and price > 0:
-                change = ((price - prev_close) / prev_close) * 100
-
-            results[sym] = QuoteResponse(
-                symbol=sym,
-                price=price,
-                change_percent=round(change, 2),
-                is_market_open=True
-            )
-        return results
-    except Exception as e:
-        logger.error(f"Batch Quote Error: {e}")
-        return {s: QuoteResponse(symbol=s, price=0.0, change_percent=0.0, is_market_open=False) for s in symbol_list}
-
-
-@app.get("/news/{symbol}", response_model=List[NewsItem])
-async def get_stock_news(symbol: str):
-    """Fetches news from Google RSS and attaches live ticker context."""
-    try:
-        sources = "site:reuters.com OR site:cnbc.com OR site:marketwatch.com"
-        if symbol.upper() == "MARKET":
-            raw_query = f"stock market ({sources})"
+    # 1. Check Cache
+    for sym in symbols:
+        cached = PRICE_CACHE.get(sym)
+        if cached and (current_time - cached['timestamp'] < CACHE_TTL):
+            prices[sym] = cached['price']
         else:
-            raw_query = f"{symbol} stock ({sources})"
+            missing.append(sym)
 
-        rss_url = f"https://news.google.com/rss/search?q={quote(raw_query)}&hl=en-US&gl=US&ceid=US:en"
-        feed = feedparser.parse(rss_url)
+    if not missing:
+        return prices
 
-        # Batch Fetch Prices logic
-        news_entries = feed.entries[:12]
-        unique_tickers = set()
-        for entry in news_entries:
-            if symbol.upper() == "MARKET":
-                ticker = derive_ticker(entry.title, "SPY")
+    # 2. Fetch from Alpaca (Primary)
+    if alpaca:
+        # Normalization: BRK-B -> BRK.B
+        alpaca_map = {sym.replace('-', '.'): sym for sym in missing}
+        alpaca_request_syms = list(alpaca_map.keys())
+
+        print(f"🔌 [LIVE] Connecting to Alpaca for: {alpaca_request_syms}")
+        try:
+            snapshots = alpaca.get_snapshots(alpaca_request_syms)
+            for alpaca_sym, snapshot in snapshots.items():
+                if snapshot and snapshot.latest_trade:
+                    price = float(snapshot.latest_trade.price)
+                    if price > 0:
+                        # Map back: BRK.B -> BRK-B
+                        orig_sym = alpaca_map.get(alpaca_sym, alpaca_sym)
+                        prices[orig_sym] = price
+                        PRICE_CACHE[orig_sym] = {"price": price, "timestamp": current_time}
+                        if orig_sym in missing: missing.remove(orig_sym)
+        except Exception as e:
+            print(f"   ❌ Alpaca Bulk Fetch Error: {e}")
+
+    # 3. Fetch from Yahoo (Backup - Only if small batch)
+    if missing:
+        # Prevent hitting rate limit with large batches
+        if len(missing) > 5:
+            print("   ⚠️ Batch too large for Yahoo fallback. Skipping.")
+            return prices
+
+        try:
+            print(f"⚠️ [LIVE] Yahoo Fallback for: {missing}")
+            data = yf.download(missing, period="1d", progress=False)['Close']
+
+            if data.empty: return prices
+
+            if len(missing) == 1:
+                val = float(data.iloc[-1])
+                prices[missing[0]] = val
+                PRICE_CACHE[missing[0]] = {"price": val, "timestamp": current_time}
             else:
-                ticker = symbol.upper()
-            unique_tickers.add(ticker)
+                curr_vals = data.iloc[-1]
+                for sym in missing:
+                    try:
+                        val = float(curr_vals[sym])
+                        prices[sym] = val
+                        PRICE_CACHE[sym] = {"price": val, "timestamp": current_time}
+                    except: pass
+        except Exception as e:
+            print(f"   ❌ Yahoo Fallback Error: {e}")
 
-        ticker_map = {}
-        if unique_tickers:
-            try:
-                provider = DataProvider()
-                from alpaca.data.requests import StockSnapshotRequest
-                snap_req = StockSnapshotRequest(symbol_or_symbols=list(unique_tickers))
-                snapshots = provider.client.get_stock_snapshot(snap_req)
+    return prices
 
-                for sym, snap in snapshots.items():
-                    price = snap.latest_trade.price if snap.latest_trade else (snap.daily_bar.close if snap.daily_bar else 0.0)
-                    if price == 0 and snap.previous_daily_bar: price = snap.previous_daily_bar.close
+# --- ENDPOINTS ---
+@app.get("/history/{symbol}")
+async def get_history(symbol: str, start: str, end: str):
+    """
+    Fetches daily closing prices between start and end date.
+    """
+    try:
+        # 1. Validation: If start date is today or future, return empty immediately
+        start_date = datetime.strptime(start, "%Y-%m-%d").date()
+        today = date.today()
 
-                    prev = snap.previous_daily_bar.close if snap.previous_daily_bar else 0.0
-                    change = ((price - prev) / prev) * 100 if prev > 0 else 0.0
-                    ticker_map[sym] = change
-            except Exception as e:
-                logger.error(f"News Price Fetch Error: {e}")
+        if start_date >= today:
+            return [{"date": start, "price": 0, "message": "New prediction: Chart data updates after market close."}]
 
-        results = []
-        for entry in news_entries:
-            title_parts = entry.title.rsplit(' - ', 1)
-            clean_title = title_parts[0]
-            publisher = title_parts[1] if len(title_parts) > 1 else "Unknown"
+        # 2. Fetch from Yahoo
+        # We wrap this in a broad try/except because yfinance raises different errors
+        # (YFPricesMissingError, ValueError, etc.) depending on the version.
+        try:
+            df = yf.download(symbol, start=start, end=end, progress=False)
+        except Exception:
+            return []
 
-            if symbol.upper() == "MARKET":
-                ticker = derive_ticker(entry.title, "SPY")
-            else:
-                ticker = symbol.upper()
+        if df.empty:
+            return []
 
-            # Fix datetime warning
-            pub_time = int(datetime(*entry.published_parsed[:6], tzinfo=timezone.utc).timestamp()) if entry.published_parsed else int(datetime.now(timezone.utc).timestamp())
+        history = []
+        for index, row in df.iterrows():
+            # Handle cases where 'Close' might be NaN
+            price = row['Close']
+            if pd.isna(price): continue
 
-            results.append(NewsItem(
-                title=clean_title,
-                publisher=publisher,
-                link=entry.link,
-                thumbnail=None,
-                published=pub_time,
-                related_ticker=ticker,
-                change_percent=round(ticker_map.get(ticker, 0.0), 2)
-            ))
-        return results
+            history.append({
+                "date": index.strftime("%Y-%m-%d"),
+                "price": float(price)
+            })
+
+        return history
 
     except Exception as e:
-        logger.error(f"News Error: {e}")
+        print(f"History Fetch Error for {symbol}: {e}")
         return []
 
-
 @app.post("/predict", response_model=PredictionResponse)
-async def predict_stock(request: StockRequest):
-    """Deep Learning Forecast"""
-    symbol = request.symbol.upper()
-    cache_key = f"prediction_v2:{symbol}"
-
-    if cache:
-        try:
-            cached = cache.get(cache_key)
-            if cached: return PredictionResponse.model_validate_json(cached)
-        except: pass
-
+async def predict(request: StockRequest):
     try:
-        provider = DataProvider()
-        data = provider.fetch_data(symbol)
-        engine = PredictionEngine()
-        result = engine.predict(request, data["history"], data["info"])
-
-        # Strict 1-hour TTL for memory management
-        if cache: cache.set(cache_key, result.model_dump_json(), ex=3600)
-        return result
+        # Inject Alpaca Client
+        engine = PredictionEngine(alpaca_client=alpaca)
+        return engine.predict(request)
     except Exception as e:
-        logger.error(f"Prediction Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
 
+@app.get("/market/movers", response_model=MarketMoversResponse)
+async def get_movers():
+    # FIX: Inject Alpaca Client here too!
+    return PredictionEngine(alpaca_client=alpaca).get_market_movers()
 
-# --- PREDICTION SAVING ROUTES ---
+@app.post("/watchlist")
+async def add_to_watchlist(item: WatchlistAddRequest, session: Session = Depends(get_session)):
+    existing = session.exec(select(Prediction).where(Prediction.symbol == item.symbol)).first()
+    if existing:
+        existing.target_price = item.target_price
+        existing.end_date = item.end_date
+        existing.initial_price = item.initial_price
+        session.add(existing)
+    else:
+        pred = Prediction(symbol=item.symbol, initial_price=item.initial_price, target_price=item.target_price, end_date=item.end_date)
+        session.add(pred)
+    session.commit()
+    return {"status": "success"}
 
-@app.post("/predict/save")
-async def save_prediction(
-        req: SavePredictionRequest,
-        db: Session = Depends(get_session)
-):
-    """
-    Saves an AI prediction.
-    If overwrite=False and active prediction exists -> 409 Conflict.
-    If overwrite=True -> Deletes old and saves new.
-    """
-    # 1. Check for Existing Active Prediction
-    statement = select(Prediction).where(
-        Prediction.user_id == req.user_id,
-        Prediction.symbol == req.symbol.upper(),
-        Prediction.status == "ACTIVE"
-    )
-    existing_bet = db.exec(statement).first()
+@app.get("/watchlist/performance", response_model=List[WatchlistPerformanceItem])
+async def get_watchlist_performance(session: Session = Depends(get_session)):
+    predictions = session.exec(select(Prediction)).all()
+    if not predictions: return []
 
-    # 2. Handle Conflict
-    if existing_bet:
-        if not req.overwrite:
-            raise HTTPException(
-                status_code=409,
-                detail="You already have an active forecast for this stock."
-            )
-        else:
-            db.delete(existing_bet)
-            db.commit()
+    today_dt = date.today()
+    active_symbols = []
 
-    # 3. Check Global Limit (Max 3 Active across all stocks)
-    count_stmt = select(Prediction).where(
-        Prediction.user_id == req.user_id,
-        Prediction.status == "ACTIVE"
-    )
-    active_count = len(db.exec(count_stmt).all())
+    for p in predictions:
+        if p.final_price == 0.0 and today_dt <= p.end_date:
+            active_symbols.append(p.symbol)
 
-    if active_count >= 3:
-        raise HTTPException(status_code=400, detail="You can only track 3 active predictions at a time.")
-
-    # 4. Save New Prediction
-    new_pred = Prediction(
-        user_id=req.user_id,
-        symbol=req.symbol.upper(),
-        start_price=req.current_price,
-        predicted_price=req.predicted_price,
-        confidence_score=req.confidence_score,
-        saved_at=datetime.now(timezone.utc), # Fix datetime warning
-        target_date=req.target_date
-    )
-    db.add(new_pred)
-    db.commit()
-    db.refresh(new_pred)
-    return {"status": "saved", "id": new_pred.id}
-
-
-@app.get("/predict/user/{user_id}")
-async def get_user_predictions(
-        user_id: str,
-        db: Session = Depends(get_session),
-        limit: int = 20
-):
-    """Fetch history of saved forecasts (Limit 20 for bandwidth)"""
-    statement = (
-        select(Prediction)
-        .where(Prediction.user_id == user_id)
-        .order_by(Prediction.saved_at.desc())
-        .limit(limit)
-    )
-    results = db.exec(statement).all()
-    return results
-
-
-# --- SCHEDULER (QSTASH) ---
-
-@app.post("/scheduler/validate")
-async def validate_predictions(
-        request: Request,
-        db: Session = Depends(get_session)
-):
-    """
-    Called by QStash daily to validate expired predictions.
-    """
-    # 1. SECURITY: Verify the request comes from QStash
-    if settings.QSTASH_CURRENT_SIGNING_KEY and settings.QSTASH_NEXT_SIGNING_KEY:
-        try:
-            receiver = Receiver(
-                current_signing_key=settings.QSTASH_CURRENT_SIGNING_KEY,
-                next_signing_key=settings.QSTASH_NEXT_SIGNING_KEY
-            )
-            body = await request.body()
-            signature = request.headers.get("Upstash-Signature")
-
-            # ⚠️ FIX: Use Keyword Arguments (body=..., signature=...)
-            receiver.verify(
-                body=body.decode(),
-                signature=signature
-            )
-        except Exception as e:
-            logger.error(f"⚠️ QStash Verification Failed: {e}")
-            raise HTTPException(status_code=401, detail="Invalid QStash Signature")
-
-    # 2. FIND PENDING PREDICTIONS
-    now = datetime.now(timezone.utc) # Fix datetime warning
-    statement = select(Prediction).where(
-        Prediction.status == "ACTIVE",
-        Prediction.target_date <= now
-    )
-    pending_bets = db.exec(statement).all()
-
-    if not pending_bets:
-        return {"message": "No predictions to validate today."}
+    live_prices = get_live_prices(list(set(active_symbols))) if active_symbols else {}
 
     results = []
+    for p in predictions:
+        current_val = 0.0
+        is_finalized = False
 
-    # 3. PROCESS VALIDATION
-    try:
-        provider = DataProvider()
-        unique_symbols = list(set(p.symbol for p in pending_bets))
+        # A. Finalized in DB
+        if p.final_price > 0.0:
+            current_val = p.final_price
+            is_finalized = True
+        # B. Needs Finalizing (Expired)
+        elif today_dt > p.end_date:
+            print(f"🔒 Finalizing {p.symbol}")
+            try:
+                # Use Yahoo for historical check (safe for single requests)
+                hist = yf.download(p.symbol, start=p.end_date, end=p.end_date + timedelta(days=3), progress=False)
+                if not hist.empty:
+                    p.final_price = float(hist['Close'].iloc[0])
+                    current_val = p.final_price
+                    session.add(p); session.commit()
+                    is_finalized = True
+                else: current_val = p.target_price
+            except: current_val = p.target_price
+        # C. Active
+        else:
+            current_val = live_prices.get(p.symbol, p.initial_price)
+            if current_val == 0.0: current_val = p.initial_price
 
-        # Batch Fetch Final Prices
-        from alpaca.data.requests import StockSnapshotRequest
-        req = StockSnapshotRequest(symbol_or_symbols=unique_symbols)
-        snapshots = provider.client.get_stock_snapshot(req)
+        diff = abs(p.target_price - current_val)
+        accuracy = max(0, 100 * (1 - (diff / p.target_price))) if p.target_price else 0
 
-        for bet in pending_bets:
-            snap = snapshots.get(bet.symbol)
-            if not snap: continue
+        status = "In Progress"
+        if is_finalized:
+            if current_val >= p.target_price: status = "✅ SUCCESS"
+            elif accuracy > 95: status = "⏱️ EXPIRED (Close)"
+            else: status = "❌ FAILED"
+        else:
+            if current_val >= p.target_price: status = "Target Hit 🎯"
+            elif accuracy > 95: status = "Very Close 🔥"
+            elif accuracy < 80: status = "Off Track ⚠️"
 
-            # Get Final Price
-            final_price = snap.latest_trade.price if snap.latest_trade else snap.daily_bar.close
-
-            # Calculate Accuracy
-            diff = abs(bet.predicted_price - final_price)
-            error_pct = (diff / final_price)
-            accuracy = max(0, (1 - error_pct)) * 100
-
-            # Update DB
-            bet.final_price = final_price
-            bet.accuracy_score = accuracy
-            bet.status = "VALIDATED"
-            db.add(bet)
-
-            results.append(f"{bet.symbol}: Final ${final_price} (Acc: {accuracy:.1f}%)")
-
-        db.commit()
-        return {"validated_count": len(results), "details": results}
-
-    except Exception as e:
-        logger.error(f"Validation Job Error: {e}")
-        return {"error": str(e)}
-
-@app.post("/scheduler/cleanup")
-async def cleanup_old_data(
-        request: Request,
-        db: Session = Depends(get_session)
-):
-    """
-    Weekly Job: Deletes validated predictions older than 30 days.
-    """
-    # 1. SECURITY
-    if settings.QSTASH_CURRENT_SIGNING_KEY and settings.QSTASH_NEXT_SIGNING_KEY:
-        try:
-            receiver = Receiver(
-                current_signing_key=settings.QSTASH_CURRENT_SIGNING_KEY,
-                next_signing_key=settings.QSTASH_NEXT_SIGNING_KEY
-            )
-            body = await request.body()
-            signature = request.headers.get("Upstash-Signature")
-
-            # ⚠️ FIX: Use Keyword Arguments here too
-            receiver.verify(
-                body=body.decode(),
-                signature=signature
-            )
-        except Exception as e:
-            logger.error(f"⚠️ QStash Verification Failed: {e}")
-            raise HTTPException(status_code=401, detail="Invalid Signature")
-
-    # 2. RETENTION POLICY (30 Days)
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=30) # Fix datetime warning
-
-    statement = delete(Prediction).where(
-        Prediction.status == "VALIDATED",
-        Prediction.target_date < cutoff_date
-    )
-
-    result = db.exec(statement)
-    db.commit()
-
-    deleted_count = result.rowcount if hasattr(result, "rowcount") else "Unknown"
-
-    return {"status": "cleanup_complete", "deleted_rows": deleted_count}
-
-# --- HELPER: SMART REDIS CONNECTION ---
-def get_redis_client():
-    """
-    Connects to Redis with logic for both Local (plain) and Cloud (SSL).
-    """
-    if not settings.REDIS_URL:
-        return None
-
-    try:
-        # 1. Handle Upstash/Cloud SSL quirks
-        # If we are using a secure connection (rediss://) or a cloud provider,
-        # we need to disable strict SSL checking to avoid "certificate verify failed"
-        # errors in minimal Docker containers.
-        ssl_context = None
-        url = settings.REDIS_URL
-
-        # Auto-upgrade to rediss:// if we detect an Upstash URL but user forgot 's'
-        if "upstash" in url and url.startswith("redis://"):
-            url = url.replace("redis://", "rediss://", 1)
-
-        # Configure connection args
-        connection_kwargs = {
-            "decode_responses": True,
-            "socket_timeout": 5  # Don't hang forever if Redis is down
-        }
-
-        # If secure, relax SSL requirements
-        if url.startswith("rediss://"):
-            connection_kwargs["ssl_cert_reqs"] = None
-
-        return redis.from_url(url, **connection_kwargs)
-
-    except Exception as e:
-        logger.warning(f"⚠️ Redis config invalid: {e}")
-        return None
-
-# Initialize Global Cache
-cache = get_redis_client()
-
-# --- LIFESPAN MANAGER ---
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global cache
-    # 1. Startup Logic
-    print("\n" + "="*60)
-    print(f"🚀  STARTING {settings.APP_NAME}")
-    print(f"🌍  ENVIRONMENT:  {settings.ENVIRONMENT}")
-
-    db_type = "POSTGRESQL (Production)" if "postgresql" in settings.DATABASE_URL else "SQLITE (Local)"
-    print(f"💾  DATABASE:     {db_type}")
-
-    # 2. Test Redis Connection
-    redis_status = "DISABLED (Not Configured)"
-    if cache:
-        try:
-            if cache.ping():
-                # Hide the password in logs
-                safe_url = settings.REDIS_URL.split("@")[-1] if "@" in settings.REDIS_URL else settings.REDIS_URL
-                redis_status = f"CONNECTED ({safe_url})"
-        except Exception as e:
-            redis_status = f"ERROR: {e}"
-            # If ping fails, disable cache to prevent runtime errors
-            cache = None
-
-    print(f"⚡  REDIS:        {redis_status}")
-    print("="*60 + "\n")
-
-    create_db_and_tables()
-
-    yield # Application runs here
-
-    # 3. Shutdown Logic
-    if cache:
-        try:
-            cache.close()
-        except: pass
+        results.append(WatchlistPerformanceItem(
+            id=p.id, symbol=p.symbol, initial_price=p.initial_price, target_price=p.target_price,
+            current_price=current_val, final_price=p.final_price if p.final_price > 0 else None,
+            end_date=p.end_date, created_at=p.created_at, accuracy_score=round(accuracy, 1), status=status
+        ))
+    return results

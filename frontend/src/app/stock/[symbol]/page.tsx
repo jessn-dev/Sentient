@@ -1,51 +1,36 @@
-'use client';
+"use client";
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import PredictionResult from "@/components/PredictionResult";
+import TradingViewWidget from "@/components/TradingViewWidget";
+import { ArrowLeftIcon } from "@heroicons/react/24/solid";
 
-import { useEffect, useState, use } from 'react'; // <--- Import 'use'
-import StatsGrid from '@/components/StatsGrid';
-import { fetchPrediction } from '@/lib/api';
-
-// params is now a Promise<{ symbol: string }>
-export default function StockOverview({ params }: { params: Promise<{ symbol: string }> }) {
-    // 1. Unwrap the params using React.use()
-    const { symbol } = use(params);
-
+export default function StockDetailsPage() {
+    const params = useParams(); const router = useRouter();
+    const symbol = (params.symbol as string).toUpperCase();
     const [data, setData] = useState<any>(null);
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // Use the unwrapped 'symbol' variable
-        fetchPrediction(symbol).then(setData).catch(console.error);
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/predict`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ symbol, days: 7 })
+        }).then(r => r.json()).then(d => { setData(d); setLoading(false); });
     }, [symbol]);
 
-    if (!data) return <div className="h-64 animate-pulse bg-slate-800/50 rounded-xl" />;
-
     return (
-        <div className="space-y-6">
-            {/* Company Header */}
-            <div className="bg-[#1e293b] border border-slate-700 rounded-xl p-8 shadow-lg">
-                <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
-                    <div>
-                        <h2 className="text-3xl font-bold text-slate-100">{symbol}</h2>
-                        <p className="text-slate-400 text-lg">U.S. Equity • Nasdaq</p>
-                    </div>
-                    <div className="text-right">
-                        <div className="text-4xl font-bold text-slate-100">${data.current_price.toFixed(2)}</div>
-                        <div className="text-emerald-400 font-medium">+0.00% (Live)</div>
-                    </div>
-                </div>
+        <main className="fixed inset-0 z-[100] bg-[#020617] text-white flex overflow-hidden">
+            <button onClick={() => router.push('/')} className="absolute top-4 left-4 z-50 p-2 bg-slate-800/80 hover:bg-blue-600 rounded-full border border-slate-700 backdrop-blur"><ArrowLeftIcon className="h-5 w-5 text-white" /></button>
+
+            <div className="w-full lg:w-[600px] bg-[#020617] border-r border-slate-800 overflow-y-auto p-8 pt-20 custom-scrollbar shrink-0">
+                <h1 className="text-6xl font-black mb-2">{symbol}</h1>
+                <div className="mb-8 flex gap-2"><span className="px-2 py-0.5 bg-blue-900/30 text-blue-400 text-[10px] font-bold uppercase border border-blue-900">SentientAI Analysis</span></div>
+                {loading ? <div className="h-[400px] bg-slate-900/20 animate-pulse rounded-2xl border border-slate-800"/> : data && <PredictionResult data={data} detailed={true} />}
             </div>
 
-            <h3 className="text-xl font-bold text-slate-200 mt-8">Key Statistics</h3>
-            <StatsGrid data={data} />
-
-            <div className="bg-blue-900/20 border border-blue-500/30 p-6 rounded-xl flex items-center justify-between">
-                <div>
-                    <h4 className="text-blue-400 font-bold text-lg">Want to see the future?</h4>
-                    <p className="text-slate-400">View our AI-powered 7-day forecast model.</p>
-                </div>
-                <a href={`/stock/${symbol}/forecast`} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-medium transition-colors">
-                    View Forecast
-                </a>
+            <div className="hidden lg:block flex-1 bg-slate-900 relative border-l border-slate-800">
+                <TradingViewWidget type="symbol-overview" symbol={data?.tv_symbol || symbol} theme="dark" />
             </div>
-        </div>
+        </main>
     );
 }

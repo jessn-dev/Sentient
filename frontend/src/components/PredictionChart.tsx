@@ -7,7 +7,7 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 export default function PredictionChart({ data }: { data: PredictionResponse }) {
     const chartData = [
         { name: 'Current', price: data.current_price },
-        { name: '7-Day Forecast', price: data.predicted_price_7d },
+        { name: '7-Day Forecast', price: data.predicted_price },
     ];
 
     const isBullish = data.price_movement === 'BULLISH';
