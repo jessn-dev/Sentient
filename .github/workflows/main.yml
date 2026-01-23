@@ -13,7 +13,7 @@ jobs:
   # ------------------------------------------------------------------
   test-backend:
     runs-on: ubuntu-latest
-    
+    # If this fails, the pipeline STOPS here. Nothing gets deployed.
     defaults:
       run:
         working-directory: ./backend
@@ -34,21 +34,29 @@ jobs:
         pip install pytest httpx # Install test runner
 
     - name: Run Tests
-      # If this fails, the pipeline STOPS here. Nothing gets deployed.
       run: |
-        python -m pytest tests/
+        python -m pytest --cov=. --cov-report=xml tests/
+
+    - name: SonarQube Scan
+      uses: SonarSource/sonarqube-scan-action@v4
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      with:
+        args: >
+          -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+          -Dsonar.organization=${{ secrets.SONAR_ORG }}
 
   # ------------------------------------------------------------------
   # JOB 2: DEPLOYMENT (CD)
   # ------------------------------------------------------------------
-  deploy-backend:
-    needs: test-backend # Wait for tests to pass
-    if: github.ref == 'refs/heads/main' # Only deploy main branch
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Trigger Render Deploy
-        run: curl "${{ secrets.RENDER_DEPLOY_HOOK }}"
+#  deploy-backend:
+#    needs: test-backend # Wait for tests to pass
+#    if: github.ref == 'refs/heads/main' # Only deploy main branch
+#    runs-on: ubuntu-latest
+#
+#    steps:
+#      - name: Trigger Render Deploy
+#        run: curl "${{ secrets.RENDER_DEPLOY_HOOK }}"
 
   # Note: Vercel (Frontend) handles its own CI automatically.
   # If you connect Vercel to your GitHub repo, it will auto-deploy

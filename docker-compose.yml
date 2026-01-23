@@ -13,8 +13,12 @@ services:
       - DATABASE_URL=sqlite:////app/data/predictions.db
       - REDIS_URL=redis://redis:6379/0
       - PORT=8000
+      - ALPACA_KEY=${ALPACA_KEY}
+      - ALPACA_SECRET=${ALPACA_SECRET}
+      - SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - SUPABASE_KEY=${NEXT_PUBLIC_SUPABASE_KEY}
     depends_on:
-      - redis  # This must match the service name below (line 28)
+      - redis
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   # 2. Frontend (Next.js 16)
@@ -29,12 +33,14 @@ services:
       - ./frontend/src:/app/src
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_KEY=${NEXT_PUBLIC_SUPABASE_KEY}
     depends_on:
       - api
     command: npm run dev
 
   # 3. Cache Layer (Redis 8.4)
-  redis:  # <--- THIS MUST BE LEFT-ALIGNED (No spaces before it)
+  redis:
     image: redis:8.4.0-alpine
     container_name: stock-redis
     ports:

@@ -1,116 +1,105 @@
+import pytest
 from unittest.mock import MagicMock, patch
-from datetime import datetime, timedelta, timezone
+from datetime import date
+import pandas as pd
 from app.models import Prediction
 
-# Note: We do NOT import TestClient or create engines here anymore.
-# We rely on the 'client' and 'session' arguments provided by conftest.py
 
-# --- TEST 1: HEALTH CHECK ---
-def test_health_check(client):
-    """Ensure the API is actually running."""
-    response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json()["status"] == "ok"
-
-# --- TEST 2: PREDICTION ENGINE (MOCKED) ---
-@patch("app.main.cache")             # Injects MockRedis
-@patch("app.main.DataProvider")      # Injects MockProvider
-@patch("app.main.PredictionEngine")  # Injects MockEngine
-def test_predict_endpoint(MockEngine, MockProvider, MockRedis, client): # <--- ADD client HERE
-    """Test that /predict calls the engine and returns formatted JSON."""
-
-    # 1. Setup Redis Mock (Cache Miss)
-    MockRedis.get.return_value = None
-
-    # 2. Setup Prediction Engine Mock
-    mock_engine_instance = MockEngine.return_value
-    mock_engine_instance.predict.return_value = MagicMock(
-        symbol="AAPL",
-        predicted_price=150.0,
-        confidence_score=0.85,
-        explanation="Bullish trend.",
-        forecast_date=datetime.now(timezone.utc).date(),
-        model_dump_json=lambda: '{"symbol": "AAPL"}'
-    )
-
-    # 3. Call the API using the 'client' fixture
-    response = client.post("/predict", json={"symbol": "AAPL", "days": 7})
-
-    # 4. Verify
-    assert response.status_code == 200
-    data = response.json()
-    assert data["symbol"] == "AAPL"
-    assert data["predicted_price"] == 150.0
-
-# --- TEST 3: SAVE PREDICTION & CONFLICT LOGIC ---
-def test_save_prediction_flow(client, session):
-    """Test saving a bet, hitting a conflict, and forcing overwrite."""
-
-    payload = {
-        "user_id": "test_user_1",
-        "symbol": "TSLA",
-        "current_price": 200.0,
-        "predicted_price": 220.0,
-        "confidence_score": 0.9,
-        "target_date": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
-        "overwrite": False
+# --- TEST 1: PREDICTION ENDPOINT ---
+@patch("app.main.PredictionEngine")
+def test_predict_endpoint(MockEngine, client):
+    """
+    Test POST /predict with full schema compliance.
+    """
+    # 1. Setup Mock
+    mock_instance = MockEngine.return_value
+    mock_instance.predict.return_value = {
+        "symbol": "NVDA",
+        "company_name": "NVIDIA Corp",  # <--- Added
+        "tv_symbol": "NASDAQ:NVDA",  # <--- Added
+        "current_price": 500.0,
+        "predicted_price": 550.0,
+        "confidence_score": 0.85,
+        "explanation": "Bullish momentum detected.",
+        "forecast_date": "2025-12-31"
     }
 
-    # 1. First Save (Should Succeed)
-    response = client.post("/predict/save", json=payload)
+    # 2. Call API
+    payload = {"symbol": "NVDA", "days": 7}
+    response = client.post("/predict", json=payload)
+
+    # 3. Verify
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["symbol"] == "NVDA"
+    assert data["company_name"] == "NVIDIA Corp"
+
+
+# --- TEST 2: WATCHLIST (Database Logic) ---
+def test_watchlist_add(client, session):
+    """
+    Test POST /watchlist saves to the DB with user_id.
+    """
+    payload = {
+        "user_id": "user_123",  # Required by DB
+        "symbol": "TSLA",
+        "initial_price": 200.0,
+        "target_price": 250.0,
+        "end_date": str(date.today())
+    }
+
+    response = client.post("/watchlist", json=payload)
+    assert response.status_code == 200, response.text
+
+    # Verify DB persistence
+    from sqlmodel import select
+    # Check that we saved it with the correct user_id
+    prediction = session.exec(
+        select(Prediction).where(Prediction.symbol == "TSLA")
+    ).first()
+
+    assert prediction is not None
+    assert prediction.target_price == 250.0
+    assert str(prediction.user_id) == "user_123"
+
+
+# --- TEST 3: HISTORY (Yahoo Mock) ---
+@patch("app.main.yf.download")
+def test_history_endpoint(mock_download, client):
+    """
+    Test GET /history with Pandas mocking.
+    """
+    # 1. Create Fake DataFrame
+    dates = pd.date_range(start="2024-01-01", periods=2)
+    mock_df = pd.DataFrame({"Close": [100.0, 105.0]}, index=dates)
+    mock_download.return_value = mock_df
+
+    # 2. Call API
+    response = client.get("/history/AAPL?start=2024-01-01&end=2024-01-03")
+
+    # 3. Verify
     assert response.status_code == 200
-    assert response.json()["status"] == "saved"
+    data = response.json()
+    assert len(data) == 2
+    assert data[0]["price"] == 100.0
 
-    # 2. Second Save (Should Fail - Conflict)
-    response = client.post("/predict/save", json=payload)
-    assert response.status_code == 409
 
-    # 3. Third Save (With Overwrite=True - Should Succeed)
-    payload["overwrite"] = True
-    response = client.post("/predict/save", json=payload)
-    assert response.status_code == 200
-    assert response.json()["status"] == "saved"
+# --- TEST 4: MARKET MOVERS ---
+@patch("app.main.PredictionEngine")
+def test_market_movers(MockEngine, client):
+    """Test GET /market/movers with full schema fields."""
+    mock_instance = MockEngine.return_value
+    mock_instance.get_market_movers.return_value = {
+        "gainers": [{
+            "symbol": "AMD",
+            "price": 100.0,
+            "change_pct": 5.2,
+            "volume": "1500000"
+        }],
+        "losers": [],
+        "active": []
+    }
 
-    # Verify DB only has 1 active bet for TSLA
-    from app.models import Prediction
-    from sqlmodel import select  # <--- Ensure 'select' is imported
-
-    # Use select(Prediction) instead of just Prediction
-    bets = session.exec(select(Prediction)).all()
-
-    assert len(bets) == 1
-    assert bets[0].symbol == "TSLA"
-
-# --- TEST 4: QSTASH VALIDATION ---
-@patch("app.main.Receiver")
-@patch("app.main.DataProvider")
-def test_scheduler_validation(MockProvider, MockReceiver, client, session):
-    """Test validation updates status."""
-
-    MockReceiver.return_value.verify.return_value = True
-
-    mock_snap = MagicMock()
-    mock_snap.latest_trade.price = 220.0
-    # Fallback to daily_bar if logic requires it
-    mock_snap.daily_bar.close = 220.0
-    MockProvider.return_value.client.get_stock_snapshot.return_value = {"TSLA": mock_snap}
-
-    # Seed DB with an "Expired" Prediction
-    expired_date = datetime.now(timezone.utc) - timedelta(days=1)
-    bet = Prediction(
-        user_id="test_user_1",
-        symbol="TSLA",
-        start_price=200.0,
-        predicted_price=210.0,
-        confidence_score=0.9,
-        target_date=expired_date,
-        status="ACTIVE"
-    )
-    session.add(bet)
-    session.commit()
-
-    headers = {"Upstash-Signature": "fake_sig"}
-    response = client.post("/scheduler/validate", headers=headers)
-
-    assert response.status_code == 200
-    assert response.json()["validated_count"] == 1
+    response = client.get("/market/movers")
+    assert response.status_code == 200, response.text
+    assert response.json()["gainers"][0]["change_pct"] == 5.2

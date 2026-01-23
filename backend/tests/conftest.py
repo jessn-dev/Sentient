@@ -1,39 +1,53 @@
 import pytest
+import os
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
 
+os.environ["SUPABASE_URL"] = "https://mock.supabase.co"
+os.environ["SUPABASE_KEY"] = "mock-key"
+os.environ["ALPACA_KEY"] = "mock-key"
+os.environ["ALPACA_SECRET"] = "mock-secret"
+
+# 1. Import the app
 from app.main import app, get_session
 
-# 1. Create a shared in-memory DB that persists for the whole test session
-# StaticPool is CRITICAL: it prevents the DB from being deleted when connections close
+# 2. CRITICAL: Import ALL models here.
+# This registers them with SQLModel so create_all() knows they exist.
+from app.models import Prediction
+from app.auth import get_current_user
+
+# 3. Create a temporary in-memory database for tests
+# We do NOT use the engine from database.py because we want a blank slate.
 engine = create_engine(
     "sqlite://",
     connect_args={"check_same_thread": False},
     poolclass=StaticPool
 )
 
-# 2. Override the API's dependency
-def get_session_override():
+
+@pytest.fixture(name="session")
+def session_fixture():
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         yield session
 
-app.dependency_overrides[get_session] = get_session_override
 
-# 3. Client Fixture (Setup/Teardown DB per test)
 @pytest.fixture(name="client")
-def client_fixture():
-    # Create tables before each test
-    SQLModel.metadata.create_all(engine)
+def client_fixture(session: Session):
+    # Mock function to bypass real authentication
+    def override_get_current_user():
+        return "user_123"
+
+    # Apply the overrides to the app instance
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_current_user] = override_get_current_user
 
     with TestClient(app) as client:
         yield client
 
-    # Drop tables after each test (Clean slate)
-    SQLModel.metadata.drop_all(engine)
-
-# 4. Session Fixture (For checking DB content in tests)
-@pytest.fixture(name="session")
-def session_fixture():
-    with Session(engine) as session:
-        yield session
+    # Clear overrides to prevent leaking into other tests
+    app.dependency_overrides.clear()

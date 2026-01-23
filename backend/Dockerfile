@@ -1,25 +1,25 @@
 # Using Python 3.12 (Has pre-built wheels for Pandas/Prophet)
 FROM python:3.12-slim-bookworm
 
+# --- 1. INSTALL UV ---
+# This was missing! We need to copy the 'uv' binary from its official image.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
 WORKDIR /app
 
 # Install System Dependencies
-# 'curl' is needed for health checks or downloading models
-# 'libgomp1' is required for Prophet's parallel processing
 RUN apt-get update && apt-get install -y \
     build-essential \
     libgomp1 \
     curl \
     && rm -rf /var/lib/apt/lists/*
-# Upgrade pip
-RUN pip install --no-cache-dir --upgrade pip
 
 # Copy Requirements
 COPY requirements.txt .
 
-# Relax the strict pinning slightly to allow pip to find the best binary match
-RUN pip install --no-cache-dir numpy>=1.26.0
-RUN pip install --no-cache-dir -r requirements.txt
+# --- 2. INSTALL DEPENDENCIES (FAST) ---
+# Now 'uv' will work because we installed it above.
+RUN uv pip install --system --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY ./app ./app

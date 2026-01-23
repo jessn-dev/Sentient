@@ -1,18 +1,6 @@
 from sqlmodel import SQLModel, Field, create_engine, Session, text
-from datetime import date
-from typing import Optional
 import os
-
-# --- Database Model ---
-class Prediction(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    symbol: str
-    initial_price: float = Field(default=0.0)
-    target_price: float = Field(default=0.0)
-    final_price: float = Field(default=0.0)
-    end_date: date
-    finalized_date: Optional[date] = Field(default=None) # <--- NEW COLUMN
-    created_at: date = Field(default_factory=date.today)
+from app.models import Prediction
 
 # --- Connection Logic ---
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./watchlist.db")

@@ -1,6 +1,7 @@
-from typing import Optional
 from sqlmodel import SQLModel, Field
 from datetime import datetime, timezone
+from datetime import date
+from typing import Optional
 
 # --- DATABASE MODELS ---
 
@@ -10,8 +11,8 @@ class Prediction(SQLModel, table=True):
     symbol: str = Field(index=True)
 
     # Prices
-    start_price: float
-    predicted_price: float
+    initial_price: float
+    target_price: float
     final_price: Optional[float] = None
 
     # Scores
@@ -23,9 +24,10 @@ class Prediction(SQLModel, table=True):
     explanation: Optional[str] = None
 
     # Dates
-    # ⚠️ FIX: This was likely missing or named differently
-    saved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    target_date: datetime
+    end_date: date
+    finalized_date: Optional[date] = Field(default=None) # <--- NEW COLUMN
+    created_at: date = Field(default_factory=date.today)
+
 
 # --- Pydantic Schemas (Request/Response Bodies) ---
 
