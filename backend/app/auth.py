@@ -1,40 +1,62 @@
 import os
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from supabase import create_client, Client
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from typing import Optional
 
-# Initialize Supabase Client
+# 1. Load Environment Variables
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")  # Use the ANON key here
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    print("⚠️ Supabase Credentials Missing! Auth will fail.")
+# 2. Initialize Supabase Client Safely (Lazy/Conditional)
+# We default to None so the app can start even if credentials are missing.
+supabase: Optional[Client] = None
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-security = HTTPBearer()
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception as e:
+        print(f"⚠️ Supabase Init Failed: {e}")
+else:
+    print("⚠️ CRITICAL: SUPABASE_URL or SUPABASE_KEY missing. Auth will fail.")
+
+# 3. Define OAuth2 Scheme
+# auto_error=False allows us to handle the error manually in the function
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+def get_current_user(token: str = Depends(oauth2_scheme)):
     """
-    Validates the JWT token sent in the Authorization header.
-    Returns the user_id (UUID) if valid, otherwise raises 401.
+    Validates the JWT token with Supabase and returns the user ID.
+    If Supabase is not configured, it raises a 503 error.
     """
-    token = credentials.credentials
+    # FAIL SAFE: Check if client exists before using it
+    if not supabase:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service not configured (Missing Credentials)"
+        )
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     try:
-        # Ask Supabase: "Is this token valid?"
-        response = supabase.auth.get_user(token)
+        # Verify the token with Supabase Auth
+        user_response = supabase.auth.get_user(token)
 
-        if not response.user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired token",
-            )
+        if user_response and user_response.user:
+            return user_response.user.id
 
-        return response.user.id
-
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+        )
     except Exception as e:
-        # print(f"Auth Error: {e}") # Debugging
+        print(f"Auth Error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
