@@ -8,7 +8,8 @@ import time
 import yfinance as yf
 import os
 import pandas as pd
-from app.database import create_db_and_tables, Prediction, get_session
+from app.database import create_db_and_tables, get_session
+from app.models import Prediction
 from app.engine import PredictionEngine
 from app.schemas import StockRequest, PredictionResponse, MarketMoversResponse, WatchlistAddRequest, WatchlistPerformanceItem
 from app.auth import get_current_user
@@ -307,3 +308,7 @@ async def add_to_watchlist(item: WatchlistAddRequest, session: Session = Depends
         session.add(pred)
     session.commit()
     return {"status": "success"}
+
+@app.get("/")
+def health_check():
+    return {"status": "running", "service": "Sentient API"}
