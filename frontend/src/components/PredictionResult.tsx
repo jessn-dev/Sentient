@@ -6,7 +6,7 @@ import {
   ChartBarIcon,
   CheckCircleIcon,
   ExclamationCircleIcon,
-  XMarkIcon // ✅ Added for Modal Close button
+  XMarkIcon
 } from "@heroicons/react/24/solid";
 import { useState } from "react";
 import Link from "next/link";
@@ -24,18 +24,23 @@ interface PredictionData {
   explanation?: string;
 }
 
+// ✅ 1. Interface is defined correctly
+interface PredictionResultProps {
+  data: PredictionData;
+  onSaveSuccess: () => void;
+  detailed?: boolean;
+}
+
+// ✅ 2. Component now uses the interface
 export default function PredictionResult({
   data,
-  onSaveSuccess
-}: {
-  data: PredictionData,
-  onSaveSuccess: () => void
-}) {
+  onSaveSuccess,
+  detailed = false
+}: PredictionResultProps) {
+
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState("");
-
-  // ✅ NEW: Controls the Overwrite Modal
   const [showOverwriteModal, setShowOverwriteModal] = useState(false);
 
   // Data parsing logic
@@ -62,10 +67,8 @@ export default function PredictionResult({
   const fmtMoney = (n: number) =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
 
-  // ✅ UPDATED SAVE HANDLER
   const handleSave = async (force: boolean = false) => {
     setSaving(true);
-    // Only reset status if we aren't forcing (forcing means we are in the middle of a flow)
     if (!force) {
         setSaveStatus('idle');
         setErrorMessage("");
@@ -81,7 +84,6 @@ export default function PredictionResult({
     }
 
     try {
-        // ✅ Append ?force=true if the user clicked "Overwrite"
         const baseUrl = `${process.env.NEXT_PUBLIC_API_URL}/watchlist`;
         const url = force ? `${baseUrl}?force=true` : baseUrl;
 
@@ -99,15 +101,13 @@ export default function PredictionResult({
             }),
         });
 
-        // ✅ CHECK FOR 409 CONFLICT FIRST
         if (response.status === 409) {
-            setShowOverwriteModal(true); // Open the modal
-            setSaving(false); // Stop loading so user can interact
+            setShowOverwriteModal(true);
+            setSaving(false);
             return;
         }
 
         if (response.ok) {
-            // Success!
             setShowOverwriteModal(false);
             setSaveStatus('success');
             setTimeout(onSaveSuccess, 1500);
@@ -156,7 +156,7 @@ export default function PredictionResult({
                 </Link>
 
                 <button
-                    onClick={() => handleSave(false)} // Try normal save first
+                    onClick={() => handleSave(false)}
                     disabled={saving || saveStatus === 'success'}
                     className={`px-6 py-2 rounded-lg text-white text-xs font-bold uppercase tracking-wider shadow-lg transition-all flex items-center gap-2 disabled:opacity-80 disabled:cursor-not-allowed ${
                         saveStatus === 'success' ? 'bg-emerald-600' :
@@ -236,7 +236,7 @@ export default function PredictionResult({
       </div>
     </div>
 
-    {/* ✅ OVERWRITE CONFIRMATION MODAL */}
+    {/* OVERWRITE CONFIRMATION MODAL */}
     {showOverwriteModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-[#151921] border border-white/10 rounded-xl p-6 max-w-md w-full shadow-2xl scale-100 animate-in zoom-in-95 duration-200">
@@ -264,7 +264,7 @@ export default function PredictionResult({
                         Cancel
                     </button>
                     <button
-                        onClick={() => handleSave(true)} // ✅ RE-TRIGGER WITH FORCE=TRUE
+                        onClick={() => handleSave(true)}
                         className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider shadow-lg shadow-indigo-500/20 transition-colors"
                     >
                         Overwrite

@@ -18,6 +18,9 @@ from .providers import DataProvider
 
 logger = logging.getLogger(__name__)
 
+# ✅ CONFIG: The specific tickers to track for Market Movers
+MOVERS_WATCHLIST = ['NVDA', 'AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL', 'TSLA', 'AMD', 'BRK-B', 'LLY']
+
 
 class PredictionEngine:
 
@@ -26,7 +29,11 @@ class PredictionEngine:
         self.trading_client = trading_client
 
     def _get_headers(self):
-        return {"User-Agent": "Mozilla/5.0"}
+        return {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Referer": "https://finviz.com/"
+        }
 
     def _get_tv_symbol(self, symbol: str) -> str:
         symbol = symbol.upper()
@@ -52,66 +59,139 @@ class PredictionEngine:
             logger.warning(f"⚠️ Google News Scrape failed for {symbol}: {e}")
             return []
 
-    def _scrape_finviz_movers(self, sort_order: str) -> list:
-        try:
-            url = f"https://finviz.com/screener.ashx?v=111&f=idx_sp500&o={sort_order}"
-            resp = requests.get(url, headers=self._get_headers(), timeout=5)
-            if resp.status_code != 200: return []
-            soup = BeautifulSoup(resp.content, "html.parser")
-            rows = soup.select("tr.table-dark-row-cp, tr.table-light-row-cp")
-            if not rows: rows = soup.select("table[class*='table-light'] tr")[1:]
+    def _fetch_market_data_unified(self) -> list[MoverItem]:
+        """
+        Attempts to fetch mover data for the specific watchlist.
+        Priority: Finviz Scrape -> YFinance Fallback.
+        """
+        items = []
 
-            movers = []
-            for row in rows[:5]:
-                cols = row.find_all("td")
-                if len(cols) > 10:
-                    try:
-                        movers.append(MoverItem(
-                            symbol=cols[1].text.strip(),
-                            price=float(cols[8].text.strip()),
-                            change_pct=float(cols[9].text.strip().replace('%', '')),
-                            volume=cols[10].text.strip()
-                        ))
-                    except:
-                        continue
-            return movers
+        # --- STRATEGY 1: Finviz Scrape (Preferred for real-time volume/change) ---
+        try:
+            # Construct URL for specific tickers
+            tickers_param = ",".join(MOVERS_WATCHLIST)
+            url = f"https://finviz.com/screener.ashx?v=111&t={tickers_param}"
+
+            logger.info(f"🕷️ Scraping Finviz Watchlist: {url}")
+            resp = requests.get(url, headers=self._get_headers(), timeout=8)
+
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.content, "html.parser")
+
+                # ✅ FIX: Combine rows instead of short-circuiting with 'or'
+                rows = soup.find_all("tr", class_="table-dark-row-cp") + \
+                       soup.find_all("tr", class_="table-light-row-cp")
+
+                # Fallback selectors if specific classes fail
+                if not rows:
+                    rows = soup.select("tr.styled-row")
+
+                # Final fallback: generic table scraping
+                if not rows:
+                    screener = soup.find("div", id="screener-content")
+                    if screener:
+                        rows = [r for r in screener.find_all("tr") if len(r.find_all("td")) > 10]
+
+                for row in rows:
+                    cols = row.find_all("td")
+                    if len(cols) > 10:
+                        try:
+                            # Finviz Columns (v=111): 1=Symbol, 8=Price, 9=Change%, 10=Volume
+                            symbol = cols[1].text.strip()
+                            price = float(cols[8].text.strip())
+                            change_pct = float(cols[9].text.strip().replace('%', ''))
+
+                            # Handle Volume (e.g., "20.5M")
+                            vol_str = cols[10].text.strip()
+                            if 'M' in vol_str:
+                                volume = float(vol_str.replace('M', '')) * 1_000_000
+                            elif 'B' in vol_str:
+                                volume = float(vol_str.replace('B', '')) * 1_000_000_000
+                            else:
+                                volume = float(vol_str.replace(',', ''))
+
+                            items.append(MoverItem(
+                                symbol=symbol,
+                                price=price,
+                                change_pct=change_pct,
+                                volume=cols[10].text.strip()  # Keep string format for display
+                            ))
+                        except Exception:
+                            continue
+
+            if items:
+                logger.info(f"✅ Finviz Success: Retrieved {len(items)} tickers")
+                return items
+
         except Exception as e:
-            logger.error(f"❌ Finviz Scrape Error: {e}")
-            return []
+            logger.warning(f"⚠️ Finviz Failed: {e}")
 
-    def _get_fallback_movers(self):
-        logger.info("🔄 Using Fallback Movers (Alpaca/Yahoo)")
-        tickers = ['NVDA', 'AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL', 'TSLA', 'AMD', 'BRK-B', 'LLY']
-        # ... (Keep existing fallback logic, it's robust enough) ...
-        # For brevity, I'm assuming the existing fallback logic from previous file is here.
-        # If you need the full code block for fallback again, let me know.
+        # --- STRATEGY 2: YFinance Fallback ---
+        logger.info("🔄 Switching to YFinance Fallback...")
         try:
-            data = yf.download(tickers, period="2d", progress=False)['Close']
-            items = []
-            for t in tickers:
+            data = yf.download(MOVERS_WATCHLIST, period="2d", progress=False)['Close']
+
+            # If only one ticker, yfinance returns a Series, not DataFrame
+            is_series = isinstance(data, pd.Series)
+
+            for t in MOVERS_WATCHLIST:
                 try:
-                    price = float(data[t].iloc[-1])
-                    prev = float(data[t].iloc[-2])
+                    # Handle single vs multi-column response
+                    if is_series and t == MOVERS_WATCHLIST[0]:
+                        price = float(data.iloc[-1])
+                        prev = float(data.iloc[-2])
+                    elif t in data:
+                        price = float(data[t].iloc[-1])
+                        prev = float(data[t].iloc[-2])
+                    else:
+                        continue
+
                     change = ((price - prev) / prev) * 100
-                    items.append({"symbol": t, "price": price, "change_pct": change, "volume": "High"})
+                    items.append(MoverItem(
+                        symbol=t,
+                        price=round(price, 2),
+                        change_pct=round(change, 2),
+                        volume="High"  # YF Close data doesn't imply volume easily without extra calls
+                    ))
                 except:
                     continue
-            items.sort(key=lambda x: x['change_pct'], reverse=True)
-            to_obj = lambda lst: [
-                MoverItem(symbol=x['symbol'], price=round(x['price'], 2), change_pct=round(x['change_pct'], 2),
-                          volume=x['volume']) for x in lst]
-            return MarketMoversResponse(gainers=to_obj(items[:3]), losers=to_obj(items[-3:]), active=to_obj(items[:5]))
-        except:
-            return MarketMoversResponse(gainers=[], losers=[], active=[])
+            return items
+        except Exception as e:
+            logger.error(f"❌ YFinance Fallback Failed: {e}")
+            return []
 
     def get_market_movers(self) -> MarketMoversResponse:
-        g = self._scrape_finviz_movers("-change")
-        l = self._scrape_finviz_movers("change")
-        a = self._scrape_finviz_movers("-volume")
-        if not g:
-            logger.warning("⚠️ Finviz returned empty. Switching to Fallback.")
-            return self._get_fallback_movers()
-        return MarketMoversResponse(gainers=g, losers=l, active=a)
+        """
+        Orchestrates the fetching and sorting of market movers.
+        """
+        # 1. Fetch All Data (Unified)
+        all_movers = self._fetch_market_data_unified()
+
+        if not all_movers:
+            return MarketMoversResponse(gainers=[], losers=[], active=[])
+
+        # 2. Sort In-Memory (No extra API calls)
+        # Gainers: Highest % Change
+        gainers = sorted(all_movers, key=lambda x: x.change_pct, reverse=True)[:3]
+
+        # Losers: Lowest % Change
+        losers = sorted(all_movers, key=lambda x: x.change_pct, reverse=False)[:3]
+
+        # Active: For Finviz, we sort by parsed volume. For YF, we just take top tickers.
+        try:
+            # Helper to parse volume string back to float for sorting
+            def parse_vol(v_str):
+                if v_str == "High": return 0
+                v = v_str.replace(',', '')
+                if 'M' in v: return float(v.replace('M', '')) * 1_000_000
+                if 'B' in v: return float(v.replace('B', '')) * 1_000_000_000
+                return float(v)
+
+            active = sorted(all_movers, key=lambda x: parse_vol(x.volume), reverse=True)[:5]
+        except:
+            active = all_movers[:5]
+
+        return MarketMoversResponse(gainers=gainers, losers=losers, active=active)
 
     def predict(self, request: StockRequest) -> PredictionResponse:
         logger.info(f"🧠 Engine: Starting analysis for {request.symbol} ({request.days} days)")
