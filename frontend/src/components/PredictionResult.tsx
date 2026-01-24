@@ -6,7 +6,9 @@ import {
   ChartBarIcon,
   CheckCircleIcon,
   ExclamationCircleIcon,
-  XMarkIcon
+  XMarkIcon,
+  CalendarDaysIcon,
+  ClockIcon
 } from "@heroicons/react/24/solid";
 import { useState } from "react";
 import Link from "next/link";
@@ -24,14 +26,12 @@ interface PredictionData {
   explanation?: string;
 }
 
-// ✅ 1. Interface is defined correctly
 interface PredictionResultProps {
   data: PredictionData;
   onSaveSuccess: () => void;
   detailed?: boolean;
 }
 
-// ✅ 2. Component now uses the interface
 export default function PredictionResult({
   data,
   onSaveSuccess,
@@ -42,32 +42,33 @@ export default function PredictionResult({
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState("");
   const [showOverwriteModal, setShowOverwriteModal] = useState(false);
+  const [showDurationModal, setShowDurationModal] = useState(false);
 
   // Data parsing logic
   const rawTarget = data.predicted_price ?? data.target_price;
   const rawCurrent = data.current_price ?? data.initial_price;
-  const rawDate   = data.forecast_date ?? data.end_date ?? new Date().toISOString();
   const targetPrice = Number(rawTarget);
   const currentPrice = Number(rawCurrent);
 
-  // Error check
-  if (isNaN(targetPrice) || targetPrice === 0 || isNaN(currentPrice) || currentPrice === 0) {
-    return (
-      <div className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-sm font-mono space-y-2">
-        <div className="font-bold flex items-center gap-2">⚠️ DATA ERROR: Missing Price Data</div>
-        <div>Symbol: {data.symbol}</div>
-      </div>
-    );
-  }
+  // Helper: Skip weekends for market dates
+  const addMarketDays = (startDate: Date, days: number) => {
+    const result = new Date(startDate);
+    result.setDate(result.getDate() + days);
+    // If Saturday (6), add 2 days -> Monday
+    if (result.getDay() === 6) result.setDate(result.getDate() + 2);
+    // If Sunday (0), add 1 day -> Monday
+    else if (result.getDay() === 0) result.setDate(result.getDate() + 1);
+    return result;
+  };
 
-  const diff = targetPrice - currentPrice;
-  const percentChange = (diff / currentPrice) * 100;
-  const isBullish = diff >= 0;
+  const handleDurationSelect = (days: number) => {
+    setShowDurationModal(false);
+    // Calculate new end date based on selection
+    const newEndDate = addMarketDays(new Date(), days).toISOString().split('T')[0];
+    initiateSave(newEndDate, false);
+  };
 
-  const fmtMoney = (n: number) =>
-    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
-
-  const handleSave = async (force: boolean = false) => {
+  const initiateSave = async (endDate: string, force: boolean) => {
     setSaving(true);
     if (!force) {
         setSaveStatus('idle');
@@ -97,7 +98,7 @@ export default function PredictionResult({
                 symbol: data.symbol,
                 initial_price: currentPrice,
                 target_price: targetPrice,
-                end_date: rawDate
+                end_date: endDate
             }),
         });
 
@@ -123,6 +124,23 @@ export default function PredictionResult({
     setSaving(false);
   };
 
+  // Error check
+  if (isNaN(targetPrice) || targetPrice === 0 || isNaN(currentPrice) || currentPrice === 0) {
+    return (
+      <div className="p-6 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-sm font-mono space-y-2">
+        <div className="font-bold flex items-center gap-2">⚠️ DATA ERROR: Missing Price Data</div>
+        <div>Symbol: {data.symbol}</div>
+      </div>
+    );
+  }
+
+  const diff = targetPrice - currentPrice;
+  const percentChange = (diff / currentPrice) * 100;
+  const isBullish = diff >= 0;
+
+  const fmtMoney = (n: number) =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
+
   return (
     <>
     <div className="w-full bg-[#151921] border border-white/10 rounded-xl overflow-hidden shadow-2xl animate-in slide-in-from-bottom-2 relative">
@@ -141,7 +159,7 @@ export default function PredictionResult({
                 </span>
             </div>
             <p className="text-sm text-slate-400 font-medium mt-1 truncate max-w-[250px] md:max-w-md">
-                {data.company_name || "Common Stock"} • 7-Day Model
+                {data.company_name || "Common Stock"} • AI Model
             </p>
           </div>
         </div>
@@ -156,7 +174,7 @@ export default function PredictionResult({
                 </Link>
 
                 <button
-                    onClick={() => handleSave(false)}
+                    onClick={() => setShowDurationModal(true)} // Open Duration Modal first
                     disabled={saving || saveStatus === 'success'}
                     className={`px-6 py-2 rounded-lg text-white text-xs font-bold uppercase tracking-wider shadow-lg transition-all flex items-center gap-2 disabled:opacity-80 disabled:cursor-not-allowed ${
                         saveStatus === 'success' ? 'bg-emerald-600' :
@@ -186,7 +204,6 @@ export default function PredictionResult({
 
       {/* STATS GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-white/5">
-        {/* CURRENT PRICE */}
         <div className="p-8 flex flex-col justify-center items-center relative group">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Current Price</span>
             <div className="text-4xl font-mono font-medium text-white group-hover:text-slate-200 transition-colors">
@@ -198,10 +215,9 @@ export default function PredictionResult({
             </div>
         </div>
 
-        {/* TARGET PRICE */}
         <div className="p-8 flex flex-col justify-center items-center relative overflow-hidden">
             <div className={`absolute inset-0 opacity-10 blur-3xl ${isBullish ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">AI Target ({rawDate.split('-').slice(1).join('/')})</span>
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">AI Target</span>
             <div className={`text-5xl font-mono font-bold tracking-tighter flex items-center gap-3 ${isBullish ? 'text-emerald-400' : 'text-rose-400'}`}>
                 {fmtMoney(targetPrice)}
                 {isBullish ? <ArrowTrendingUpIcon className="h-8 w-8 opacity-50"/> : <ArrowTrendingDownIcon className="h-8 w-8 opacity-50"/>}
@@ -227,7 +243,7 @@ export default function PredictionResult({
                         <>
                         Our Prophet model projects a <span className={isBullish ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
                         {Math.abs(percentChange).toFixed(1)}% {isBullish ? "increase" : "decrease"}
-                        </span> to <span className="text-slate-200 font-mono font-medium">{fmtMoney(targetPrice)}</span> by <span className="text-slate-200 font-medium">{new Date(rawDate).toLocaleDateString()}</span>.
+                        </span> to <span className="text-slate-200 font-mono font-medium">{fmtMoney(targetPrice)}</span>.
                         </>
                     )}
                 </p>
@@ -235,6 +251,40 @@ export default function PredictionResult({
         </div>
       </div>
     </div>
+
+    {/* ✅ DURATION SELECTION MODAL */}
+    {showDurationModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-[#151921] border border-white/10 rounded-xl p-6 max-w-md w-full shadow-2xl scale-100 animate-in zoom-in-95 duration-200">
+                <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-center gap-3 text-indigo-400">
+                        <ClockIcon className="h-6 w-6" />
+                        <h3 className="text-lg font-bold text-white">Select Timeline</h3>
+                    </div>
+                    <button onClick={() => setShowDurationModal(false)} className="text-slate-500 hover:text-white transition-colors">
+                        <XMarkIcon className="h-5 w-5" />
+                    </button>
+                </div>
+
+                <p className="text-slate-400 text-sm mb-6 leading-relaxed">
+                    How long do you want to track this prediction for? The AI score will be finalized on this date.
+                </p>
+
+                <div className="grid grid-cols-3 gap-3">
+                    {[7, 15, 30].map((days) => (
+                        <button
+                            key={days}
+                            onClick={() => handleDurationSelect(days)}
+                            className="flex flex-col items-center justify-center p-4 rounded-lg bg-white/5 hover:bg-indigo-600 border border-white/10 hover:border-indigo-500 transition-all group"
+                        >
+                            <span className="text-2xl font-bold text-white mb-1">{days}</span>
+                            <span className="text-[10px] uppercase font-bold text-slate-500 group-hover:text-indigo-200">Days</span>
+                        </button>
+                    ))}
+                </div>
+            </div>
+        </div>
+    )}
 
     {/* OVERWRITE CONFIRMATION MODAL */}
     {showOverwriteModal && (
@@ -251,9 +301,7 @@ export default function PredictionResult({
                 </div>
 
                 <p className="text-slate-400 text-sm mb-6 leading-relaxed">
-                    You are already tracking <strong>{data.symbol}</strong> in your watchlist.
-                    <br/><br/>
-                    Do you want to <strong>overwrite</strong> your existing prediction with this new AI forecast?
+                    You are already tracking <strong>{data.symbol}</strong>. Overwriting will update the target and reset the timeline.
                 </p>
 
                 <div className="flex gap-3 justify-end">
@@ -264,7 +312,7 @@ export default function PredictionResult({
                         Cancel
                     </button>
                     <button
-                        onClick={() => handleSave(true)}
+                        onClick={() => initiateSave(data.end_date || new Date().toISOString(), true)}
                         className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider shadow-lg shadow-indigo-500/20 transition-colors"
                     >
                         Overwrite

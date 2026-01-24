@@ -166,28 +166,31 @@ async def get_watchlist_performance(session: Session = Depends(get_session), use
     today_dt = date.today()
     active_symbols = []
 
+    # Helper to check if a date is a market day (Mon-Fri)
     def get_next_market_day(d: date) -> date:
         while d.weekday() > 4: d += timedelta(days=1)
         return d
 
+    # Identify active symbols to fetch live prices
     for p in predictions:
         final_price = p.final_price if p.final_price is not None else 0.0
-        check_date = get_next_market_day(p.end_date)
-        if final_price == 0.0 and today_dt <= check_date: active_symbols.append(p.symbol)
+        # Only fetch live price if NOT finalized and NOT expired
+        if final_price == 0.0:
+            active_symbols.append(p.symbol)
 
     live_prices = get_live_prices(list(set(active_symbols))) if active_symbols else {}
     results = []
 
     for p in predictions:
         final_price = p.final_price if p.final_price is not None else 0.0
-        current_val = 0.0
-        is_finalized = False
         target_final_date = get_next_market_day(p.end_date)
+        is_matured = today_dt >= target_final_date
 
+        # 1. Determine "Final" or "Current" price
         if final_price > 0.0:
-            current_val = final_price
-            is_finalized = True
-        elif today_dt >= target_final_date:
+            current_val = final_price  # It's finalized
+        elif is_matured:
+            # Try to finalize it now
             try:
                 hist = yf.download(p.symbol, start=target_final_date, end=target_final_date + timedelta(days=2),
                                    progress=False)
@@ -199,38 +202,44 @@ async def get_watchlist_performance(session: Session = Depends(get_session), use
                     session.add(p)
                     session.commit()
                     session.refresh(p)
-                    is_finalized = True
+                    final_price = val
                 else:
-                    current_val = p.target_price
+                    # Market might be closed or data delayed
+                    current_val = live_prices.get(p.symbol, p.initial_price)
             except:
-                current_val = p.target_price
+                current_val = live_prices.get(p.symbol, p.initial_price)
         else:
+            # Active tracking
             current_val = live_prices.get(p.symbol, p.initial_price)
             if current_val == 0.0: current_val = p.initial_price
 
-        diff = abs(p.target_price - current_val)
-        accuracy = max(0, 100 * (1 - (diff / p.target_price))) if p.target_price else 0
-        status = "In Progress"
-        if is_finalized:
+        # 2. Calculate Accuracy (ONLY if Finalized/Matured)
+        if final_price > 0.0 or is_matured:
+            diff = abs(p.target_price - current_val)
+            accuracy = max(0, 100 * (1 - (diff / p.target_price))) if p.target_price else 0
+
             if current_val >= p.target_price:
                 status = "✅ SUCCESS"
             elif accuracy > 95:
-                status = "⏱️ EXPIRED (Close)"
+                status = "⏱️ CLOSE"
             else:
                 status = "❌ FAILED"
         else:
-            if current_val >= p.target_price:
-                status = "Target Hit 🎯"
-            elif accuracy > 95:
-                status = "Very Close 🔥"
-            elif accuracy < 80:
-                status = "Off Track ⚠️"
+            accuracy = 0  # Pending
+            status = "⏳ PENDING"
 
         results.append(WatchlistPerformanceItem(
-            id=p.id, symbol=p.symbol, initial_price=p.initial_price, target_price=p.target_price,
-            current_price=current_val, final_price=final_price if final_price > 0 else None,
-            end_date=p.end_date, finalized_date=p.finalized_date, created_at=p.created_at,
-            accuracy_score=round(accuracy, 1), status=status
+            id=p.id,
+            symbol=p.symbol,
+            initial_price=p.initial_price,
+            target_price=p.target_price,
+            current_price=current_val,
+            final_price=final_price if final_price > 0 else None,
+            end_date=p.end_date,
+            finalized_date=p.finalized_date,
+            created_at=p.created_at,
+            accuracy_score=round(accuracy, 1),
+            status=status
         ))
     return results
 
@@ -450,8 +459,6 @@ async def get_sentiment(symbol: str):
         "economic_context": macro_data
     }
 
-
-# ✅ NEW ENDPOINT: Institutional Data
 @app.get("/market/data/{symbol}", response_model=RealTimeMarketData)
 async def get_market_data(symbol: str):
     logger.info(f"🪙 Market Data Request: {symbol}")
@@ -479,7 +486,7 @@ async def validate_user_email(request: UserCheckRequest):
     return {"exists": False, "message": "Email available"}
 
 
-@app.get("/")
+@app.get("/health")
 def health_check():
     return {"status": "running", "service": "Sentient API"}
 

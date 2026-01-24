@@ -1,6 +1,7 @@
 import pandas as pd
 import requests
 import logging
+import time  # ✅ Added for cache timing
 from bs4 import BeautifulSoup
 from prophet import Prophet
 from textblob import TextBlob
@@ -23,6 +24,13 @@ MOVERS_WATCHLIST = ['NVDA', 'AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL', 'TSLA', 'AM
 
 
 class PredictionEngine:
+    # ✅ CACHE STORAGE (Class-Level)
+    # This persists across different requests/instances of PredictionEngine
+    _MOVERS_CACHE = {
+        "data": [],
+        "timestamp": 0
+    }
+    _CACHE_TTL = 300  # 5 Minutes (300 seconds)
 
     def __init__(self, data_client=None, trading_client=None):
         self.provider = DataProvider(data_client)
@@ -78,19 +86,19 @@ class PredictionEngine:
             if resp.status_code == 200:
                 soup = BeautifulSoup(resp.content, "html.parser")
 
-                # ✅ FIX: Combine rows instead of short-circuiting with 'or'
+                # Robust Selector: Find the main table or styled rows
                 rows = soup.find_all("tr", class_="table-dark-row-cp") + \
                        soup.find_all("tr", class_="table-light-row-cp")
 
-                # Fallback selectors if specific classes fail
-                if not rows:
-                    rows = soup.select("tr.styled-row")
-
-                # Final fallback: generic table scraping
+                # If standard classes fail, try the generic screener table approach
                 if not rows:
                     screener = soup.find("div", id="screener-content")
                     if screener:
                         rows = [r for r in screener.find_all("tr") if len(r.find_all("td")) > 10]
+
+                # Fallback: Look for any row with class 'styled-row'
+                if not rows:
+                    rows = soup.select("tr.styled-row")
 
                 for row in rows:
                     cols = row.find_all("td")
@@ -102,19 +110,13 @@ class PredictionEngine:
                             change_pct = float(cols[9].text.strip().replace('%', ''))
 
                             # Handle Volume (e.g., "20.5M")
-                            vol_str = cols[10].text.strip()
-                            if 'M' in vol_str:
-                                volume = float(vol_str.replace('M', '')) * 1_000_000
-                            elif 'B' in vol_str:
-                                volume = float(vol_str.replace('B', '')) * 1_000_000_000
-                            else:
-                                volume = float(vol_str.replace(',', ''))
+                            # Keep string format for display in MoverItem
 
                             items.append(MoverItem(
                                 symbol=symbol,
                                 price=price,
                                 change_pct=change_pct,
-                                volume=cols[10].text.strip()  # Keep string format for display
+                                volume=cols[10].text.strip()
                             ))
                         except Exception:
                             continue
@@ -162,10 +164,28 @@ class PredictionEngine:
 
     def get_market_movers(self) -> MarketMoversResponse:
         """
-        Orchestrates the fetching and sorting of market movers.
+        Orchestrates the fetching and sorting of market movers with CACHING.
         """
-        # 1. Fetch All Data (Unified)
-        all_movers = self._fetch_market_data_unified()
+
+        # ✅ CACHE CHECK
+        current_time = time.time()
+        cached_data = PredictionEngine._MOVERS_CACHE.get("data")
+        cached_ts = PredictionEngine._MOVERS_CACHE.get("timestamp", 0)
+        cache_age = current_time - cached_ts
+
+        if cached_data and cache_age < PredictionEngine._CACHE_TTL:
+            logger.info(f"⚡ Using Cached Market Movers ({int(cache_age)}s old)")
+            all_movers = cached_data
+        else:
+            # 1. Fetch All Data (Unified)
+            all_movers = self._fetch_market_data_unified()
+
+            # ✅ UPDATE CACHE (Only if we got data)
+            if all_movers:
+                PredictionEngine._MOVERS_CACHE = {
+                    "data": all_movers,
+                    "timestamp": current_time
+                }
 
         if not all_movers:
             return MarketMoversResponse(gainers=[], losers=[], active=[])
