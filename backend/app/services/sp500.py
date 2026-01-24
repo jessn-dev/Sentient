@@ -1,8 +1,10 @@
 import pandas as pd
 import requests
+import logging
 from io import StringIO
-from functools import lru_cache
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 # Simple in-memory cache
 _sp500_cache = {"data": set(), "expires": datetime.min}
@@ -16,8 +18,10 @@ def get_sp500_tickers():
 
     # 1. Check Cache
     if now < _sp500_cache["expires"] and _sp500_cache["data"]:
+        # logger.info("Using Cached S&P 500 List") # Optional: Uncomment if debugging cache
         return _sp500_cache["data"]
 
+    logger.info("🔄 Refreshing S&P 500 List from Wikipedia...")
     try:
         # 2. Fetch with Headers (Fixes 403 Forbidden)
         url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
@@ -26,10 +30,9 @@ def get_sp500_tickers():
         }
 
         response = requests.get(url, headers=headers)
-        response.raise_for_status() # Raise error if 403/404
+        response.raise_for_status()
 
         # 3. Parse HTML
-        # Wrap HTML string in StringIO because Pandas deprecates raw strings
         html_data = StringIO(response.text)
         tables = pd.read_html(html_data)
         df = tables[0]
@@ -46,13 +49,12 @@ def get_sp500_tickers():
         _sp500_cache["data"] = tickers
         _sp500_cache["expires"] = now + timedelta(hours=24)
 
-        print(f"✅ S&P 500 List Updated ({len(tickers)} symbols)")
+        logger.info(f"✅ S&P 500 List Updated ({len(tickers)} symbols)")
         return tickers
 
     except Exception as e:
-        print(f"⚠️ Failed to fetch S&P 500 list: {e}")
-        # Fallback: If live fetch fails, allow LLY and others temporarily
-        # Ideally, you'd load a local static CSV here as a backup
+        logger.error(f"⚠️ Failed to fetch S&P 500 list: {e}")
+        # Fallback
         fallback = {
             "SPY", "NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META",
             "TSLA", "AMD", "JPM", "V", "LLY", "AVGO", "WMT", "XOM"

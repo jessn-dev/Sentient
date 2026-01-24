@@ -136,7 +136,33 @@ Code quality is monitored via SonarQube Cloud with a CI-based analysis pipeline.
 - Backend: Python coverage via pytest-cov (coverage.xml).
 - Frontend: TypeScript coverage via lcov (lcov.info).
 
+## ⚡ Smart Wake-Up Strategy (Cost Optimization)
 
+To stay within Render's Free Tier limits (750 hours/month) while avoiding painful 50+ second "cold starts," I implemented a hybrid wake-up strategy.
+
+### The Problem:
+
+- Cold Starts: Render spins down free services after 15 minutes of inactivity. The next request can take nearly a minute to load.
+
+- Usage Limits: Keeping the service alive 24/7 uses ~720 hours/month, leaving no margin for error.
+
+The Solution: I used a Hybrid Approach combining a custom Python script with GitHub Actions to "pre-warm" the server only during business hours.
+
+1. The Waker Script (backend/wake_up.py):
+
+- A zero-dependency Python script using urllib.
+
+- Implements Retry Logic to handle the initial timeout common during cold starts.
+
+- Treats HTTP 404/500 as "Success" (proof the container is awake) to avoid unnecessary retries.
+
+2. The Scheduler (GitHub Actions):
+
+- Runs wake_up.py automatically at 8:00 AM UTC, Mon-Fri.
+
+- Ensures the API is hot and ready before the developer starts working, but allows it to sleep at night to save resources.
+
+Usage: The workflow is defined in .github/workflows/wake_up.yml and requires the NEXT_PUBLIC_API_URL secret.
 ## API Endpoints
 
 |  Method | Endpoint  |  Description |

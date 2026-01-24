@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Save, AlertTriangle, X, Check, Trash2 } from 'lucide-react';
+import { Save, AlertTriangle } from 'lucide-react';
 
 interface Props {
     symbol: string;

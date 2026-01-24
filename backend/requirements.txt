@@ -11,12 +11,10 @@ feedparser==6.0.12
 yfinance==0.2.54
 sqlmodel==0.0.14
 psycopg2-binary==2.9.11
-qstash==3.2.0
 pytest==9.0.2
 pyarrow==22.0.0
 plotly==6.5.2
 lxml==6.0.2
-textblob==0.19.0
 requests==2.32.5
 beautifulsoup4==4.14.3
 pydantic
@@ -24,3 +22,9 @@ scikit-learn
 supabase
 pytest-cov
 coverage
+feedparser
+praw
+fredapi
+textblob
+email-validator
+qstash

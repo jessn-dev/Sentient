@@ -1,91 +1,62 @@
 "use client";
 import { useState } from "react";
-import { ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/24/solid";
+import { ChevronDownIcon, ChevronUpIcon, ChartBarIcon } from "@heroicons/react/24/solid";
 
-// Top 30 Weights (Always Visible)
-const TOP_30 = [
-    { symbol: "AAPL", name: "Apple Inc." }, { symbol: "MSFT", name: "Microsoft Corp." },
-    { symbol: "NVDA", name: "NVIDIA Corp." }, { symbol: "AMZN", name: "Amazon.com" },
-    { symbol: "META", name: "Meta Platforms" }, { symbol: "GOOGL", name: "Alphabet Inc." },
-    { symbol: "TSLA", name: "Tesla Inc." }, { symbol: "BRK.B", name: "Berkshire Hathaway" },
-    { symbol: "LLY", name: "Eli Lilly" }, { symbol: "AVGO", name: "Broadcom" },
-    { symbol: "JPM", name: "JPMorgan Chase" }, { symbol: "V", name: "Visa Inc." },
-    { symbol: "XOM", name: "Exxon Mobil" }, { symbol: "UNH", name: "UnitedHealth" },
-    { symbol: "MA", name: "Mastercard" }, { symbol: "PG", name: "Procter & Gamble" },
-    { symbol: "JNJ", name: "Johnson & Johnson" }, { symbol: "HD", name: "Home Depot" },
-    { symbol: "COST", name: "Costco" }, { symbol: "ABBV", name: "AbbVie" },
-    { symbol: "AMD", name: "Adv. Micro Devices" }, { symbol: "NFLX", name: "Netflix" },
-    { symbol: "KO", name: "Coca-Cola" }, { symbol: "PEP", name: "PepsiCo" },
-    { symbol: "DIS", name: "Walt Disney" }, { symbol: "CSCO", name: "Cisco Systems" },
-    { symbol: "INTC", name: "Intel Corp." }, { symbol: "VZ", name: "Verizon" },
-    { symbol: "PFE", name: "Pfizer" }, { symbol: "WMT", name: "Walmart" },
+const SP500_SYMBOLS = [
+  "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "BRK.B", "LLY", "AVGO",
+  "JPM", "XOM", "UNH", "V", "PG", "MA", "COST", "JNJ", "HD", "MRK",
+  "ABBV", "CVX", "BAC", "AMD", "PEP", "KO", "NFLX", "WMT", "ADBE", "CRM",
+  "TMO", "MCD", "CSCO", "ACN", "LIN", "ABT", "DHR", "ORCL", "DIS", "CAT",
+  "INTC", "VZ", "CMCSA", "INTU", "QCOM", "IBM", "AMGN", "PFE", "TXN", "NOW"
 ];
 
-// Expanded List (Simulated for Demo - In prod this could be fetched)
-const FULL_LIST = [
-    ...TOP_30,
-    { symbol: "T", name: "AT&T Inc." }, { symbol: "BA", name: "Boeing Co." },
-    { symbol: "IBM", name: "IBM" }, { symbol: "GE", name: "General Electric" },
-    { symbol: "F", name: "Ford Motor" }, { symbol: "GM", name: "General Motors" },
-    { symbol: "CAT", name: "Caterpillar" }, { symbol: "MMM", name: "3M Company" },
-    { symbol: "CVX", name: "Chevron" }, { symbol: "GS", name: "Goldman Sachs" },
-    { symbol: "MS", name: "Morgan Stanley" }, { symbol: "C", name: "Citigroup" },
-    { symbol: "WFC", name: "Wells Fargo" }, { symbol: "BAC", name: "Bank of America" },
-    { symbol: "USB", name: "US Bancorp" }, { symbol: "AXP", name: "American Express" },
-    { symbol: "BLK", name: "BlackRock" }, { symbol: "SPGI", name: "S&P Global" },
-    { symbol: "MCD", name: "McDonald's" }, { symbol: "SBUX", name: "Starbucks" },
-    { symbol: "NKE", name: "Nike" }, { symbol: "LULU", name: "Lululemon" },
-    { symbol: "TGT", name: "Target" }, { symbol: "LOW", name: "Lowe's" },
-    { symbol: "TJX", name: "TJX Companies" }, { symbol: "BKNG", name: "Booking Holdings" },
-    { symbol: "UBER", name: "Uber Tech" }, { symbol: "ABNB", name: "Airbnb" },
-    { symbol: "MAR", name: "Marriott" }, { symbol: "HLT", name: "Hilton" },
-    // ... (This list would normally fetch from your API)
-];
+export default function SP500Reference({ onSelect }: { onSelect: (sym: string) => void }) {
+  const [expanded, setExpanded] = useState(false);
 
-interface Props {
-  onSelect: (symbol: string) => void;
-}
+  // Show only top 10 if not expanded
+  const displayed = expanded ? SP500_SYMBOLS : SP500_SYMBOLS.slice(0, 10);
 
-export default function SP500Reference({ onSelect }: Props) {
-    const [expanded, setExpanded] = useState(false);
-    const visibleList = expanded ? FULL_LIST : TOP_30;
+  return (
+    <div className="bg-[#151921] rounded-xl overflow-hidden">
+      <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
+        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+           <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+           S&P 500 Quick List
+        </h3>
+        <span className="text-[10px] bg-white/5 px-2 py-0.5 rounded text-slate-500 font-mono">
+            {expanded ? "ALL" : "TOP 10"}
+        </span>
+      </div>
 
-    return (
-        <div className="flex flex-col bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden h-full max-h-[800px]">
-            <div className="p-4 border-b border-slate-800 bg-slate-950">
-                <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">
-                    S&P 500 Reference
-                </h3>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
-                {visibleList.map((stock) => (
-                    <button
-                        key={stock.symbol}
-                        onClick={() => onSelect(stock.symbol)}
-                        className="w-full flex items-center justify-between p-2 hover:bg-slate-800 rounded-lg group transition-colors text-left"
-                    >
-                        <span className="font-bold text-sm text-blue-400 group-hover:text-blue-300">
-                          {stock.symbol}
-                        </span>
-                        <span className="text-xs text-slate-500 font-medium truncate max-w-[120px] text-right group-hover:text-slate-400">
-                          {stock.name}
-                        </span>
-                    </button>
-                ))}
-            </div>
-
-            {/* EXPAND BUTTON (Now Functional) */}
+      <div className="max-h-[300px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+        <div className="grid grid-cols-1 divide-y divide-white/5">
+          {displayed.map((sym, i) => (
             <button
-                onClick={() => setExpanded(!expanded)}
-                className="p-3 border-t border-slate-800 bg-slate-950 hover:bg-slate-900 transition-colors text-[10px] font-bold uppercase text-slate-400 flex items-center justify-center gap-2"
+              key={sym}
+              onClick={() => onSelect(sym)}
+              className="group flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors text-left"
             >
-                {expanded ? (
-                    <>Show Less <ChevronUpIcon className="h-3 w-3"/></>
-                ) : (
-                    <>+ Load All Constituents <ChevronDownIcon className="h-3 w-3"/></>
-                )}
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-mono text-slate-600 w-4">{i + 1}</span>
+                <span className="text-sm font-bold text-slate-300 group-hover:text-white transition-colors">{sym}</span>
+              </div>
+              <ChartBarIcon className="h-4 w-4 text-slate-600 group-hover:text-indigo-400 transition-colors opacity-0 group-hover:opacity-100" />
             </button>
+          ))}
         </div>
-    );
+      </div>
+
+      {/* FOOTER BUTTON */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full py-3 flex items-center justify-center gap-2 text-xs font-bold text-slate-400 hover:text-white hover:bg-white/5 transition-colors border-t border-white/5 uppercase tracking-wider"
+      >
+        {expanded ? (
+            <>Show Less <ChevronUpIcon className="h-3 w-3" /></>
+        ) : (
+            <>View All {SP500_SYMBOLS.length} <ChevronDownIcon className="h-3 w-3" /></>
+        )}
+      </button>
+    </div>
+  );
 }

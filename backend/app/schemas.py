@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from datetime import date
 from typing import Optional, List
 
@@ -80,3 +80,27 @@ class WatchlistPerformanceItem(BaseModel):
     created_at: date
     accuracy_score: float
     status: str
+
+class OptionStats(BaseModel):
+    put_call_ratio: float
+    total_call_vol: int
+    total_put_vol: int
+    implied_volatility: float
+    nearest_expiry: str
+
+class FundHolder(BaseModel):
+    holder: str
+    shares: int
+    date_reported: str
+    percent_out: float
+
+class RealTimeMarketData(BaseModel):
+    symbol: str
+    market_cap: float
+    short_float: float     # Short Interest %
+    institutional_ownership: float
+    options_sentiment: Optional[OptionStats] = None
+    top_holders: List[FundHolder] = []
+
+class UserCheckRequest(BaseModel):
+    email: EmailStr

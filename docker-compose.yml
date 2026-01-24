@@ -10,6 +10,7 @@ services:
       - ./backend:/app
       - ./backend/data:/app/data # <--- PERSIST THE DB HERE
     environment:
+      - PYTHONUNBUFFERED=1
       - DATABASE_URL=sqlite:////app/data/predictions.db
       - REDIS_URL=redis://redis:6379/0
       - PORT=8000

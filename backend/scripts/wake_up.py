@@ -1,20 +1,22 @@
 import time
-import requests
 import os
 import sys
+import urllib.request
+import urllib.error
 
-# a "smart" wake-up call that respects Render's free tier limits (750 hours/month)
+# this is a "smart" wake-up call that respects Render's free tier limits (750 hours/month)
 # and handles the "cold start" delay (which can be 50+ seconds), we will use a Hybrid Approach:
 # The Waker Script (Python): A robust script with Retry Logic (Fallback).
 # Standard HTTP requests often timeout during a Render cold start. This script will try, wait, and retry until the API wakes up.
 # The Scheduler (GitHub Actions): Using GitHub Actions (which is free) to run this script on a specific "Business Hours" schedule.
 # This ensures you don't run 24/7 and hit the usage limit.
 
-# 1. CONFIGURATION
-# We can set this in GitHub Secrets, or default to a hardcoded URL for simple setups
-URL = os.getenv("NEXT_PUBLIC_API_URL", "https://your-api-name.onrender.com")
+# --- CONFIGURATION ---
+# Default to a placeholder if env var is missing (helpful for local testing)
+URL = os.getenv("NEXT_PUBLIC_API_URL", "https://your-api-name.onrender.com").rstrip("/")
 MAX_RETRIES = 5
 RETRY_DELAY = 10  # Seconds
+TIMEOUT = 60  # Render cold starts can take ~50s
 
 
 def wake_up():
@@ -22,29 +24,40 @@ def wake_up():
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            # 2. THE ATTEMPT
-            # Render cold starts can take 50s+. We set a long timeout.
             start_time = time.time()
-            response = requests.get(f"{URL}/health", timeout=60)
-            duration = time.time() - start_time
+            # Send a request with a User-Agent to mimic a real browser
+            req = urllib.request.Request(
+                URL,
+                headers={'User-Agent': 'Sentient-Waker-Bot/1.0'}
+            )
 
-            # 3. SUCCESS
-            if response.status_code == 200:
-                print(f"✅ Success! API is awake. (Response time: {duration:.2f}s)")
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as response:
+                duration = time.time() - start_time
+                print(f"✅ Success! API is awake. (Status: {response.status}, Time: {duration:.2f}s)")
                 return True
-            else:
-                print(f"⚠️ API returned status {response.status_code}. Retrying...")
 
-        except requests.exceptions.RequestException as e:
-            # 4. FALLBACK LOGIC
-            # If the request fails (timeout/connection error), we don't give up.
-            print(f"❌ Attempt {attempt}/{MAX_RETRIES} failed: {e}")
-            print(f"⏳ Waiting {RETRY_DELAY}s for fallback retry...")
+        except urllib.error.HTTPError as e:
+            # OPTIMIZATION: If we get a 404, 401, or 500, the server IS awake.
+            # We typically only care that the container has started, not that the endpoint is perfect.
+            duration = time.time() - start_time
+            print(f"✅ API is awake (Status: {e.code}). (Time: {duration:.2f}s)")
+            return True
+
+        except urllib.error.URLError as e:
+            # OPTIMIZATION: Only retry on connection errors or timeouts (Cold Start symptoms)
+            print(f"❌ Attempt {attempt}/{MAX_RETRIES} failed: {e.reason}")
+            print(f"⏳ Waiting {RETRY_DELAY}s for cold start...")
+            time.sleep(RETRY_DELAY)
+
+        except Exception as e:
+            print(f"❌ Unexpected error: {e}")
             time.sleep(RETRY_DELAY)
 
     print("💀 Failed to wake API after multiple attempts.")
-    sys.exit(1)  # Fail the GitHub Action
+    sys.exit(1)
 
 
 if __name__ == "__main__":
+    if "your-api-name" in URL:
+        print("⚠️ Warning: Using placeholder URL. Set NEXT_PUBLIC_API_URL.")
     wake_up()

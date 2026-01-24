@@ -26,6 +26,7 @@ COPY ./app ./app
 
 # Define the default port environment variable
 ENV PORT=8000
+ENV PYTHONUNBUFFERED=1
 
 # Expose port
 EXPOSE $PORT
