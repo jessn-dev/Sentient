@@ -180,7 +180,7 @@ One of the biggest challenges was ensuring the backend was robust without hittin
 
 - Solution: I implemented a custom client fixture in conftest.py that utilizes FastAPI's dependency_overrides.
 
-- Outcome: By swapping the production Postgres session with an in-memory SQLite instance (sqlite://), we achieved fast, isolated integration tests that verify the full request lifecycle without risking data corruption.
+- Outcome: By swapping the production Postgres session with an in-memory SQLite instance (sqlite://), I achieved fast, isolated integration tests that verify the full request lifecycle without risking data corruption.
 
 2. Monorepo Quality Assurance
 Managing code quality for both Python (Backend) and TypeScript (Frontend) in a single repository required a specialized setup.
@@ -195,7 +195,7 @@ Reliance on a single financial data provider can lead to failures if rate limits
 - Solution: I built a hybrid fetching strategy in main.py. The system primarily attempts to fetch real-time data from Alpaca Markets but seamlessly falls back to Yahoo Finance (yfinance) if the primary source fails or returns missing data.
 
 4. Serverless Automation
-Instead of maintaining a perpetually running server for cron jobs (which is costly and prone to downtime), we decoupled the scheduling logic.
+Instead of maintaining a perpetually running server for cron jobs (which is costly and prone to downtime), I decoupled the scheduling logic.
 
 - Solution: I integrated Upstash (QStash) to trigger our /scheduler/validate and /scheduler/cleanup endpoints via webhooks.
 
@@ -206,11 +206,11 @@ Instead of maintaining a perpetually running server for cron jobs (which is cost
 
 #### Why do my tests fail with "Not authenticated"?
 
-Your API routes use Depends(get_current_user). In conftest.py, we use app.dependency_overrides to swap this dependency with a mock function that returns a fake user_id. If a test fails with 401, check if you accidentally cleared overrides or didn't use the client fixture.
+Your API routes use Depends(get_current_user). In conftest.py, I used app.dependency_overrides to swap this dependency with a mock function that returns a fake user_id. If a test fails with 401, check if you accidentally cleared overrides or didn't use the client fixture.
 
 #### Why does the chart sometimes show "Invalid environment" errors in the console?
 
-This is a TradingView widget issue in Next.js. It happens when the script tries to access window during Server-Side Rendering (SSR). We fixed this by using dynamic(() => import(...), { ssr: false }) to force the widget to load only on the client.
+This is a TradingView widget issue in Next.js. It happens when the script tries to access window during Server-Side Rendering (SSR). I fixed this by using dynamic(() => import(...), { ssr: false }) to force the widget to load only on the client.
 
 #### My "Market Movers" aren't updating in real-time. Why?
 
