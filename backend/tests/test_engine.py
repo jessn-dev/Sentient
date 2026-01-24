@@ -138,6 +138,8 @@ def test_market_movers_total_failure():
     """
     Test that the engine handles total failure gracefully (empty lists).
     """
+    PredictionEngine._MOVERS_CACHE = {}
+
     engine = PredictionEngine()
 
     with patch("requests.get", side_effect=Exception("Finviz Down")):
