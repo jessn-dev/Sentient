@@ -22,4 +22,4 @@ jobs:
         env:
           # Use the secret or hardcode your URL here
           NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
-        run: python backend/wake_up.py
+        run: python backend/scripts/wake_up.py
