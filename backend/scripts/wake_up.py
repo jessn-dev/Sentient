@@ -12,15 +12,20 @@ import urllib.error
 # This ensures you don't run 24/7 and hit the usage limit.
 
 # --- CONFIGURATION ---
-# Default to a placeholder if env var is missing (helpful for local testing)
-URL = os.getenv("NEXT_PUBLIC_API_URL", "https://your-api-name.onrender.com").rstrip("/")
+# FIX: Use 'or' to handle cases where env var exists but is empty string ""
+env_url = os.getenv("NEXT_PUBLIC_API_URL")
+URL = (env_url or "http://127.0.0.1:8000").rstrip("/")
+
 MAX_RETRIES = 5
 RETRY_DELAY = 10  # Seconds
 TIMEOUT = 60  # Render cold starts can take ~50s
 
-
 def wake_up():
     print(f"⏰ Waking up API at: {URL}")
+
+    if not URL.startswith("http"):
+        print(f"❌ Error: Invalid URL '{URL}'. Must start with http:// or https://")
+        sys.exit(1)
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
@@ -38,13 +43,11 @@ def wake_up():
 
         except urllib.error.HTTPError as e:
             # OPTIMIZATION: If we get a 404, 401, or 500, the server IS awake.
-            # We typically only care that the container has started, not that the endpoint is perfect.
             duration = time.time() - start_time
             print(f"✅ API is awake (Status: {e.code}). (Time: {duration:.2f}s)")
             return True
 
         except urllib.error.URLError as e:
-            # OPTIMIZATION: Only retry on connection errors or timeouts (Cold Start symptoms)
             print(f"❌ Attempt {attempt}/{MAX_RETRIES} failed: {e.reason}")
             print(f"⏳ Waiting {RETRY_DELAY}s for cold start...")
             time.sleep(RETRY_DELAY)
@@ -58,6 +61,4 @@ def wake_up():
 
 
 if __name__ == "__main__":
-    if "your-api-name" in URL:
-        print("⚠️ Warning: Using placeholder URL. Set NEXT_PUBLIC_API_URL.")
     wake_up()
